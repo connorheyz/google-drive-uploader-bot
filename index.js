@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, Partials } = require('discord.js');
 const GoogleDriveService = require('./google-drive');
 
 // Initialize Discord client
@@ -11,6 +11,11 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.DirectMessageReactions
+    ],
+    partials: [
+        Partials.Message,
+        Partials.Reaction,
+        Partials.User
     ]
 });
 
@@ -51,25 +56,18 @@ function getFileNameFromUrl(url) {
 }
 
 client.once(Events.ClientReady, (readyClient) => {
-    console.log(`🤖 Discord Art Upload Bot is ready!`);
-    console.log(`👤 Logged in as ${readyClient.user.tag}`);
-    console.log(`📋 Upload channels: ${UPLOAD_CHANNELS.length}`);
-    console.log(`📝 Approval channel: ${APPROVAL_CHANNEL_ID || 'Not configured'}`);
-    console.log(`📤 Upload emoji: ${UPLOAD_EMOJI}`);
+    console.log(`Discord Art Upload Bot is ready!`);
+    console.log(`Logged in as ${readyClient.user.tag}`);
+    console.log(`Upload channels: ${UPLOAD_CHANNELS.length}`);
+    console.log(`Approval channel: ${APPROVAL_CHANNEL_ID || 'Not configured'}`);
+    console.log(`Upload emoji: ${UPLOAD_EMOJI}`);
 });
 
 // Handle message reactions (upload requests)
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-    // DEBUG: Log all reactions
-    console.log(`🔍 DEBUG: Reaction detected!`);
-    console.log(`   👤 User: ${user.tag} (${user.id})`);
-    console.log(`   📝 Channel: ${reaction.message.channel.id}`);
-    console.log(`   📱 Emoji: ${reaction.emoji.name} (ID: ${reaction.emoji.id || 'N/A'})`);
-    console.log(`   🤖 Is Bot: ${user.bot}`);
     
     // Ignore bot reactions
     if (user.bot) {
-        console.log(`   ⏭️ Skipping: Bot reaction`);
         return;
     }
 
@@ -78,23 +76,28 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         try {
             await reaction.fetch();
         } catch (error) {
-            console.error('❌ Error fetching reaction:', error);
+            console.error('❌ Error fetching partial reaction:', error);
+            return;
+        }
+    }
+
+    // Partial message handling (critical for old messages)
+    if (reaction.message.partial) {
+        try {
+            await reaction.message.fetch();
+        } catch (error) {
+            console.error('❌ Error fetching partial message:', error);
             return;
         }
     }
 
     // Check if it's the upload emoji
-    console.log(`   🎯 Checking emoji: "${reaction.emoji.name}" vs "${UPLOAD_EMOJI}"`);
     if (reaction.emoji.name !== UPLOAD_EMOJI && reaction.emoji.id !== UPLOAD_EMOJI) {
-        console.log(`   ❌ Emoji mismatch: Not the upload emoji`);
         return;
     }
-    console.log(`   ✅ Emoji match: This is the upload emoji!`);
 
     // Check if it's in an allowed upload channel
-    console.log(`   📋 Checking channel: "${reaction.message.channel.id}" in [${UPLOAD_CHANNELS.join(', ')}]`);
     if (!UPLOAD_CHANNELS.includes(reaction.message.channel.id)) {
-        console.log(`   ❌ Channel not allowed for uploads`);
         try {
             await user.send('❌ Upload requests are only allowed in designated art channels.');
         } catch (error) {
@@ -102,7 +105,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         }
         return;
     }
-    console.log(`   ✅ Channel allowed for uploads!`);
 
     // Check if message has attachments
     if (reaction.message.attachments.size === 0) {
