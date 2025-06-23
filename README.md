@@ -56,7 +56,7 @@ cd discord-bot
 npm install
 
 # Copy environment template
-cp config.env.example .env
+cp .env.example .env
 ```
 
 ### 5. Configuration
