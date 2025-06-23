@@ -42,7 +42,7 @@ A Discord bot that allows users to upload art from Discord directly to Google Dr
 ```bash
 # You'll need to implement OAuth flow or use tools like:
 # https://developers.google.com/oauthplayground/
-# Set scope to: https://www.googleapis.com/auth/drive.file
+# Set scope to: https://www.googleapis.com/auth/drive
 ```
 
 ### 4. Installation
