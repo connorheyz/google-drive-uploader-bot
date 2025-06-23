@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, Partials, StringSelectMenuBuilder } = require('discord.js');
 const GoogleDriveService = require('./google-drive');
 
 // Initialize Discord client
@@ -55,12 +55,113 @@ function getFileNameFromUrl(url) {
     }
 }
 
-client.once(Events.ClientReady, (readyClient) => {
+// Helper function to send or update folder selection message
+async function sendFolderSelectionMessage(user, requestId, interaction = null) {
+    const request = uploadRequests.get(requestId);
+    if (!request) return;
+
+    // Get folders for current path
+    const folders = driveService.getFoldersForSelectMenu(request.currentPath);
+    
+    const embed = new EmbedBuilder()
+        .setTitle('📤 Upload to Google Drive')
+        .setDescription(`**File:** ${request.originalFileName} (${formatFileSize(request.fileSize)})`)
+        .addFields(
+            { name: '📁 Current Location', value: request.currentPath || '*(Root)*', inline: true },
+            { name: '📝 File Name', value: request.fileName, inline: true },
+            { name: '📋 Description', value: request.description || '*(none)*', inline: false }
+        )
+        .setColor(0x3498db)
+        .setTimestamp();
+
+    const components = [];
+
+    // Folder selection dropdown (if folders exist)
+    if (folders.length > 0) {
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId(`folder_select_${requestId}`)
+            .setPlaceholder('📁 Choose a folder to navigate into...')
+            .addOptions(folders);
+
+        components.push(new ActionRowBuilder().addComponents(selectMenu));
+    }
+
+    // Navigation and action buttons
+    const buttonRow = new ActionRowBuilder();
+
+    // Back button (if not at root)
+    if (request.currentPath) {
+        buttonRow.addComponents(
+            new ButtonBuilder()
+                .setCustomId(`folder_back_${requestId}`)
+                .setLabel('Back')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji('⬅️')
+        );
+    }
+
+    // Edit file details button
+    buttonRow.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`edit_details_${requestId}`)
+            .setLabel('Edit Details')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('✏️')
+    );
+
+    // Confirm upload button
+    buttonRow.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`confirm_upload_${requestId}`)
+            .setLabel('Upload Here')
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅')
+    );
+
+    components.push(buttonRow);
+
+    // Add folder status info
+    if (folders.length === 0 && !request.currentPath) {
+        embed.addFields({ name: '⚠️ No Folders', value: 'No subfolders found. You can upload to the root location.', inline: false });
+    } else if (folders.length === 0) {
+        embed.addFields({ name: '📁 End of Path', value: 'No subfolders here. Choose "Upload Here" to upload to this location.', inline: false });
+    }
+
+    const messageData = { embeds: [embed], components };
+
+    // If interaction is provided (from deferUpdate), edit the message
+    if (interaction) {
+        await interaction.editReply(messageData);
+    } else {
+        // Otherwise send new message
+        await user.send(messageData);
+    }
+}
+
+client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Discord Art Upload Bot is ready!`);
     console.log(`Logged in as ${readyClient.user.tag}`);
     console.log(`Upload channels: ${UPLOAD_CHANNELS.length}`);
     console.log(`Approval channel: ${APPROVAL_CHANNEL_ID || 'Not configured'}`);
     console.log(`Upload emoji: ${UPLOAD_EMOJI}`);
+    
+    // Build initial folder cache
+    try {
+        await driveService.buildFolderCache();
+        
+        // Set up periodic cache refresh (every 15 minutes)
+        setInterval(async () => {
+            try {
+                console.log('🔄 Refreshing folder cache...');
+                await driveService.buildFolderCache();
+            } catch (error) {
+                console.error('⚠️ Failed to refresh folder cache:', error.message);
+            }
+        }, 15 * 60 * 1000); // 15 minutes
+        
+    } catch (error) {
+        console.error('⚠️ Failed to build initial folder cache:', error.message);
+    }
 });
 
 // Handle message reactions (upload requests)
@@ -142,83 +243,79 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         originalFileName: originalFileName,
         fileSize: attachment.size,
         contentType: attachment.contentType,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        // New fields for folder navigation
+        currentPath: '',
+        fileName: originalFileName,
+        description: ''
     });
 
-    // Create and send modal for upload details
-    const modal = new ModalBuilder()
-        .setCustomId(`upload_modal_${requestId}`)
-        .setTitle('📤 Upload to Google Drive');
-
-    const fileNameInput = new TextInputBuilder()
-        .setCustomId('filename')
-        .setLabel('File Name')
-        .setStyle(TextInputStyle.Short)
-        .setValue(originalFileName)
-        .setRequired(true)
-        .setMaxLength(100);
-
-    const pathInput = new TextInputBuilder()
-        .setCustomId('path')
-        .setLabel('Upload Path')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g., projects/game-art/characters')
-        .setRequired(false)
-        .setMaxLength(200);
-
-    const descriptionInput = new TextInputBuilder()
-        .setCustomId('description')
-        .setLabel('Description (optional)')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Brief description of the artwork...')
-        .setRequired(false)
-        .setMaxLength(500);
-
-    modal.addComponents(
-        new ActionRowBuilder().addComponents(fileNameInput),
-        new ActionRowBuilder().addComponents(pathInput),
-        new ActionRowBuilder().addComponents(descriptionInput)
-    );
-
-    // Send modal to user
+    // Send folder selection message to user
     try {
-        // We need to create an interaction-like object to show the modal
-        // Since this is from a reaction, we'll send a message with buttons instead
-        const embed = new EmbedBuilder()
-            .setTitle('📤 Upload Request Started')
-            .setDescription(`You've requested to upload **${originalFileName}** (${formatFileSize(attachment.size)})`)
-            .addFields(
-                { name: '📁 Original File', value: originalFileName, inline: true },
-                { name: '📊 File Size', value: formatFileSize(attachment.size), inline: true },
-                { name: '🔗 Action Required', value: 'Click the button below to set upload details', inline: false }
-            )
-            .setColor(0x3498db)
-            .setTimestamp();
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`upload_details_${requestId}`)
-                    .setLabel('Set Upload Details')
-                    .setStyle(ButtonStyle.Primary)
-                    .setEmoji('⚙️')
-            );
-
-        await user.send({ embeds: [embed], components: [row] });
-        
+        await sendFolderSelectionMessage(user, requestId);
     } catch (error) {
         console.error('❌ Error sending upload request to user:', error);
         uploadRequests.delete(requestId);
     }
 });
 
-// Handle button interactions (for upload details)
+// Handle interactions (buttons, select menus, modals)
 client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+    if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
 
-    // Handle upload details button
-    if (interaction.isButton() && interaction.customId.startsWith('upload_details_')) {
-        const requestId = interaction.customId.replace('upload_details_', '');
+    // Handle folder selection (select menu)
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('folder_select_')) {
+        const requestId = interaction.customId.replace('folder_select_', '');
+        const request = uploadRequests.get(requestId);
+        
+        if (!request) {
+            await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+            return;
+        }
+
+        // Update current path
+        request.currentPath = interaction.values[0];
+        uploadRequests.set(requestId, request);
+
+        // Update the message with new folder navigation
+        await interaction.deferUpdate();
+        try {
+            await sendFolderSelectionMessage(interaction.user, requestId, interaction);
+        } catch (error) {
+            console.error('❌ Error updating folder navigation:', error);
+            await interaction.followUp({ content: '❌ Error updating folder navigation.', ephemeral: true });
+        }
+    }
+
+    // Handle back navigation
+    if (interaction.isButton() && interaction.customId.startsWith('folder_back_')) {
+        const requestId = interaction.customId.replace('folder_back_', '');
+        const request = uploadRequests.get(requestId);
+        
+        if (!request) {
+            await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+            return;
+        }
+
+        // Go back one level
+        const pathParts = request.currentPath.split('/');
+        pathParts.pop(); // Remove last part
+        request.currentPath = pathParts.join('/');
+        uploadRequests.set(requestId, request);
+
+        // Update the message
+        await interaction.deferUpdate();
+        try {
+            await sendFolderSelectionMessage(interaction.user, requestId, interaction);
+        } catch (error) {
+            console.error('❌ Error navigating back:', error);
+            await interaction.followUp({ content: '❌ Error navigating back.', ephemeral: true });
+        }
+    }
+
+    // Handle edit details button
+    if (interaction.isButton() && interaction.customId.startsWith('edit_details_')) {
+        const requestId = interaction.customId.replace('edit_details_', '');
         const request = uploadRequests.get(requestId);
         
         if (!request) {
@@ -227,45 +324,37 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         const modal = new ModalBuilder()
-            .setCustomId(`upload_modal_${requestId}`)
-            .setTitle('📤 Upload to Google Drive');
+            .setCustomId(`details_modal_${requestId}`)
+            .setTitle('✏️ Edit Upload Details');
 
         const fileNameInput = new TextInputBuilder()
             .setCustomId('filename')
             .setLabel('File Name')
             .setStyle(TextInputStyle.Short)
-            .setValue(request.originalFileName)
+            .setValue(request.fileName)
             .setRequired(true)
             .setMaxLength(100);
-
-        const pathInput = new TextInputBuilder()
-            .setCustomId('path')
-            .setLabel('Upload Path')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('e.g., projects/game-art/characters')
-            .setRequired(false)
-            .setMaxLength(200);
 
         const descriptionInput = new TextInputBuilder()
             .setCustomId('description')
             .setLabel('Description (optional)')
             .setStyle(TextInputStyle.Paragraph)
+            .setValue(request.description || '')
             .setPlaceholder('Brief description of the artwork...')
             .setRequired(false)
             .setMaxLength(500);
 
         modal.addComponents(
             new ActionRowBuilder().addComponents(fileNameInput),
-            new ActionRowBuilder().addComponents(pathInput),
             new ActionRowBuilder().addComponents(descriptionInput)
         );
 
         await interaction.showModal(modal);
     }
 
-    // Handle modal submission
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('upload_modal_')) {
-        const requestId = interaction.customId.replace('upload_modal_', '');
+    // Handle confirm upload button
+    if (interaction.isButton() && interaction.customId.startsWith('confirm_upload_')) {
+        const requestId = interaction.customId.replace('confirm_upload_', '');
         const request = uploadRequests.get(requestId);
         
         if (!request) {
@@ -274,16 +363,6 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         await interaction.deferReply({ ephemeral: true });
-
-        const fileName = interaction.fields.getTextInputValue('filename').trim();
-        const uploadPath = interaction.fields.getTextInputValue('path').trim();
-        const description = interaction.fields.getTextInputValue('description').trim();
-
-        // Update request with form data
-        request.fileName = fileName;
-        request.uploadPath = uploadPath;
-        request.description = description;
-        uploadRequests.set(requestId, request);
 
         // Send approval request to approval channel
         if (!APPROVAL_CHANNEL_ID) {
@@ -302,11 +381,11 @@ client.on(Events.InteractionCreate, async interaction => {
             .setDescription(`**${interaction.user.displayName}** wants to upload a file to Google Drive`)
             .addFields(
                 { name: '👤 Requested by', value: `<@${interaction.user.id}>`, inline: true },
-                { name: '📁 File Name', value: fileName, inline: true },
+                { name: '📁 File Name', value: request.fileName, inline: true },
                 { name: '📊 File Size', value: formatFileSize(request.fileSize), inline: true },
-                { name: '📂 Upload Path', value: uploadPath || '*(root folder)*', inline: true },
+                { name: '📂 Upload Path', value: request.currentPath || '*(root folder)*', inline: true },
                 { name: '🔗 Original File', value: request.originalFileName, inline: true },
-                { name: '📋 Description', value: description || '*(no description)*', inline: false }
+                { name: '📋 Description', value: request.description || '*(no description)*', inline: false }
             )
             .setColor(0xf39c12)
             .setTimestamp()
@@ -338,12 +417,41 @@ client.on(Events.InteractionCreate, async interaction => {
             });
             
             request.approvalMessageId = approvalMessage.id;
+            request.uploadPath = request.currentPath; // Store final path
             uploadRequests.set(requestId, request);
 
             await interaction.editReply('✅ Upload request submitted for approval! You\'ll be notified when it\'s processed.');
         } catch (error) {
             console.error('❌ Error sending approval request:', error);
             await interaction.editReply('❌ Error submitting request for approval. Contact an administrator.');
+        }
+    }
+
+    // Handle details modal submission
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('details_modal_')) {
+        const requestId = interaction.customId.replace('details_modal_', '');
+        const request = uploadRequests.get(requestId);
+        
+        if (!request) {
+            await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+            return;
+        }
+
+        const fileName = interaction.fields.getTextInputValue('filename').trim();
+        const description = interaction.fields.getTextInputValue('description').trim();
+
+        // Update request with form data
+        request.fileName = fileName;
+        request.description = description;
+        uploadRequests.set(requestId, request);
+
+        // Update the folder selection message
+        await interaction.deferUpdate();
+        try {
+            await sendFolderSelectionMessage(interaction.user, requestId, interaction);
+        } catch (error) {
+            console.error('❌ Error updating details:', error);
+            await interaction.followUp({ content: '❌ Error updating details.', ephemeral: true });
         }
     }
 
@@ -367,8 +475,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     throw new Error(downloadResult.error);
                 }
 
-                // Get folder ID for upload path
-                const folderId = await driveService.getFolderIdByPath(request.uploadPath);
+                // Get folder ID for upload path (using cache)
+                const folderId = driveService.getCachedFolderIdByPath(request.uploadPath);
 
                 // Upload to Google Drive
                 const uploadResult = await driveService.uploadFile(
@@ -506,7 +614,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     }
 
-    // Handle edit modal submission
+    // Handle officer edit modal submission (from approval message)
     if (interaction.isModalSubmit() && interaction.customId.startsWith('edit_modal_')) {
         const requestId = interaction.customId.replace('edit_modal_', '');
         const request = uploadRequests.get(requestId);
