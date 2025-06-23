@@ -1,0 +1,19 @@
+{
+  "name": "discord-art-uploader-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for uploading art to Google Drive with approval workflow",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": ["discord", "bot", "google-drive", "art", "upload"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "googleapis": "^129.0.0",
+    "axios": "^1.6.2"
+  }
+} 
