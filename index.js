@@ -384,7 +384,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 { name: '📁 File Name', value: request.fileName, inline: true },
                 { name: '📊 File Size', value: formatFileSize(request.fileSize), inline: true },
                 { name: '📂 Upload Path', value: request.currentPath || '*(root folder)*', inline: true },
-                { name: '🔗 Original File', value: request.originalFileName, inline: true },
+                { name: '🔗 Original File', value: request.attachmentUrl, inline: true },
                 { name: '📋 Description', value: request.description || '*(no description)*', inline: false }
             )
             .setColor(0xf39c12)
@@ -458,10 +458,31 @@ client.on(Events.InteractionCreate, async interaction => {
     // Handle approval/denial buttons (from officer approval channel)
     if (interaction.isButton() && (interaction.customId.startsWith('approve_') || interaction.customId.startsWith('deny_'))) {
         const [action, requestId] = interaction.customId.split('_');
-        const request = uploadRequests.get(requestId);
         
-        if (!request) {
-            await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+        // Extract request information from the embed
+        const embed = interaction.message.embeds[0];
+        if (!embed) {
+            await interaction.reply({ content: '❌ Could not find request information in message.', ephemeral: true });
+            return;
+        }
+
+        // Check if already processed (title indicates status)
+        if (embed.title.includes('APPROVED') || embed.title.includes('DENIED')) {
+            await interaction.reply({ content: '❌ This request has already been processed.', ephemeral: true });
+            return;
+        }
+
+        // Extract fields from embed
+        const getFieldValue = (name) => embed.fields.find(f => f.name === name)?.value;
+        
+        const userId = getFieldValue('👤 Requested by')?.match(/<@(\d+)>/)?.[1];
+        const fileName = getFieldValue('📁 File Name');
+        const uploadPath = getFieldValue('📂 Upload Path')?.replace('*(root folder)*', '');
+        const description = getFieldValue('📋 Description')?.replace('*(no description)*', '');
+        const attachmentUrl = getFieldValue('🔗 Original File');
+
+        if (!userId || !fileName || !attachmentUrl) {
+            await interaction.reply({ content: '❌ Missing required information in approval message.', ephemeral: true });
             return;
         }
 
@@ -470,23 +491,23 @@ client.on(Events.InteractionCreate, async interaction => {
             
             try {
                 // Download file from Discord
-                const downloadResult = await driveService.downloadFile(request.attachmentUrl);
+                const downloadResult = await driveService.downloadFile(attachmentUrl);
                 if (!downloadResult.success) {
                     throw new Error(downloadResult.error);
                 }
 
                 // Get folder ID for upload path (using cache)
-                const folderId = driveService.getCachedFolderIdByPath(request.uploadPath);
+                const folderId = driveService.getCachedFolderIdByPath(uploadPath);
 
                 // Upload to Google Drive
                 const uploadResult = await driveService.uploadFile(
                     downloadResult.buffer,
-                    request.fileName,
+                    fileName,
                     downloadResult.mimeType,
                     folderId,
                     {
-                        description: request.description,
-                        uploader: request.userId,
+                        description: description,
+                        uploader: userId,
                         approver: interaction.user.id
                     }
                 );
@@ -496,25 +517,25 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 // Update approval message
-                const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+                const updatedEmbed = EmbedBuilder.from(embed)
                     .setColor(0x27ae60)
                     .setTitle('✅ Upload Request APPROVED')
                     .addFields({ name: '👨‍💼 Approved by', value: `<@${interaction.user.id}>`, inline: true });
 
                 await interaction.message.edit({ 
                     embeds: [updatedEmbed], 
-                    components: [] 
+                    components: [] // Remove buttons after processing
                 });
 
                 // Notify requester
-                const requester = client.users.cache.get(request.userId);
+                const requester = client.users.cache.get(userId);
                 if (requester) {
                     const successEmbed = new EmbedBuilder()
                         .setTitle('✅ Upload Approved!')
-                        .setDescription(`Your file **${request.fileName}** has been uploaded to Google Drive`)
+                        .setDescription(`Your file **${fileName}** has been uploaded to Google Drive`)
                         .addFields(
-                            { name: '📁 File Name', value: request.fileName, inline: true },
-                            { name: '📂 Location', value: request.uploadPath || '*(root folder)*', inline: true },
+                            { name: '📁 File Name', value: fileName, inline: true },
+                            { name: '📂 Location', value: uploadPath || '*(root folder)*', inline: true },
                             { name: '👨‍💼 Approved by', value: interaction.user.displayName, inline: true },
                             { name: '🔗 View File', value: `[Open in Google Drive](${uploadResult.webViewLink})`, inline: false }
                         )
@@ -529,41 +550,39 @@ client.on(Events.InteractionCreate, async interaction => {
             } catch (error) {
                 console.error('❌ Error during upload approval:', error);
                 
-                const errorEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+                const errorEmbed = EmbedBuilder.from(embed)
                     .setColor(0xe74c3c)
                     .setTitle('❌ Upload Request FAILED')
                     .addFields({ name: '❌ Error', value: error.message, inline: false });
 
                 await interaction.message.edit({ 
                     embeds: [errorEmbed], 
-                    components: [] 
+                    components: [] // Remove buttons after processing
                 });
 
                 await interaction.editReply(`❌ Error during upload: ${error.message}`);
-            } finally {
-                uploadRequests.delete(requestId);
             }
 
         } else if (action === 'deny') {
             await interaction.deferReply({ ephemeral: true });
             
             // Update approval message
-            const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+            const updatedEmbed = EmbedBuilder.from(embed)
                 .setColor(0xe74c3c)
                 .setTitle('❌ Upload Request DENIED')
                 .addFields({ name: '👨‍💼 Denied by', value: `<@${interaction.user.id}>`, inline: true });
 
             await interaction.message.edit({ 
                 embeds: [updatedEmbed], 
-                components: [] 
+                components: [] // Remove buttons after processing
             });
 
             // Notify requester
-            const requester = client.users.cache.get(request.userId);
+            const requester = client.users.cache.get(userId);
             if (requester) {
                 const deniedEmbed = new EmbedBuilder()
                     .setTitle('❌ Upload Request Denied')
-                    .setDescription(`Your upload request for **${request.fileName}** has been denied.`)
+                    .setDescription(`Your upload request for **${fileName}** has been denied.`)
                     .addFields({ name: '👨‍💼 Denied by', value: interaction.user.displayName, inline: true })
                     .setColor(0xe74c3c)
                     .setTimestamp();
@@ -572,7 +591,6 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             await interaction.editReply('❌ Upload request denied.');
-            uploadRequests.delete(requestId);
         }
     }
 
@@ -653,7 +671,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 { name: '📁 File Name', value: fileName, inline: true },
                 { name: '📊 File Size', value: formatFileSize(request.fileSize), inline: true },
                 { name: '📂 Upload Path', value: uploadPath || '*(root folder)*', inline: true },
-                { name: '🔗 Original File', value: request.originalFileName, inline: true },
+                { name: '🔗 Original File', value: request.attachmentUrl, inline: true },
                 { name: '📋 Description', value: description || '*(no description)*', inline: false },
                 { name: '✏️ Last edited by', value: `<@${interaction.user.id}>`, inline: true }
             );
