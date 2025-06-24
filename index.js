@@ -404,7 +404,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('❌'),
                 new ButtonBuilder()
-                    .setCustomId(`edit_${requestId}`)
+                    .setCustomId(`officer_edit_${requestId}`)
                     .setLabel('Edit Details')
                     .setStyle(ButtonStyle.Secondary)
                     .setEmoji('✏️')
@@ -455,8 +455,8 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     }
 
-    // Handle approval/denial buttons
-    if (interaction.isButton() && (interaction.customId.startsWith('approve_') || interaction.customId.startsWith('deny_') || interaction.customId.startsWith('edit_'))) {
+    // Handle approval/denial buttons (from officer approval channel)
+    if (interaction.isButton() && (interaction.customId.startsWith('approve_') || interaction.customId.startsWith('deny_'))) {
         const [action, requestId] = interaction.customId.split('_');
         const request = uploadRequests.get(requestId);
         
@@ -573,45 +573,55 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.editReply('❌ Upload request denied.');
             uploadRequests.delete(requestId);
-
-        } else if (action === 'edit') {
-            // Show modal for editing upload details
-            const modal = new ModalBuilder()
-                .setCustomId(`edit_modal_${requestId}`)
-                .setTitle('✏️ Edit Upload Details');
-
-            const fileNameInput = new TextInputBuilder()
-                .setCustomId('filename')
-                .setLabel('File Name')
-                .setStyle(TextInputStyle.Short)
-                .setValue(request.fileName)
-                .setRequired(true)
-                .setMaxLength(100);
-
-            const pathInput = new TextInputBuilder()
-                .setCustomId('path')
-                .setLabel('Upload Path')
-                .setStyle(TextInputStyle.Short)
-                .setValue(request.uploadPath || '')
-                .setRequired(false)
-                .setMaxLength(200);
-
-            const descriptionInput = new TextInputBuilder()
-                .setCustomId('description')
-                .setLabel('Description')
-                .setStyle(TextInputStyle.Paragraph)
-                .setValue(request.description || '')
-                .setRequired(false)
-                .setMaxLength(500);
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(fileNameInput),
-                new ActionRowBuilder().addComponents(pathInput),
-                new ActionRowBuilder().addComponents(descriptionInput)
-            );
-
-            await interaction.showModal(modal);
         }
+    }
+
+    // Handle officer edit button (from approval message)  
+    if (interaction.isButton() && interaction.customId.startsWith('officer_edit_')) {
+        const requestId = interaction.customId.replace('officer_edit_', '');
+        const request = uploadRequests.get(requestId);
+        
+                 if (!request) {
+             await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+             return;
+         }
+
+        // Show modal for editing upload details
+        const modal = new ModalBuilder()
+            .setCustomId(`edit_modal_${requestId}`)
+            .setTitle('✏️ Edit Upload Details');
+
+        const fileNameInput = new TextInputBuilder()
+            .setCustomId('filename')
+            .setLabel('File Name')
+            .setStyle(TextInputStyle.Short)
+            .setValue(request.fileName)
+            .setRequired(true)
+            .setMaxLength(100);
+
+        const pathInput = new TextInputBuilder()
+            .setCustomId('path')
+            .setLabel('Upload Path')
+            .setStyle(TextInputStyle.Short)
+            .setValue(request.uploadPath || '')
+            .setRequired(false)
+            .setMaxLength(200);
+
+        const descriptionInput = new TextInputBuilder()
+            .setCustomId('description')
+            .setLabel('Description')
+            .setStyle(TextInputStyle.Paragraph)
+            .setValue(request.description || '')
+            .setRequired(false)
+            .setMaxLength(500);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(fileNameInput),
+            new ActionRowBuilder().addComponents(pathInput),
+            new ActionRowBuilder().addComponents(descriptionInput)
+        );
+
+        await interaction.showModal(modal);
     }
 
     // Handle officer edit modal submission (from approval message)
