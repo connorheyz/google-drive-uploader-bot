@@ -149,7 +149,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     try {
         await driveService.buildFolderCache();
         
-        // Set up periodic cache refresh (every 15 minutes)
+        // Set up periodic cache refresh (every 1 hour)
         setInterval(async () => {
             try {
                 console.log('🔄 Refreshing folder cache...');
@@ -157,7 +157,7 @@ client.once(Events.ClientReady, async (readyClient) => {
             } catch (error) {
                 console.error('⚠️ Failed to refresh folder cache:', error.message);
             }
-        }, 60 * 60 * 1000); // 15 minutes
+        }, 60 * 60 * 1000); // 1 hour
         
     } catch (error) {
         console.error('⚠️ Failed to build initial folder cache:', error.message);

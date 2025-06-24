@@ -26,7 +26,7 @@ class GoogleDriveService {
             tree: {},
             flat: new Map(), // id -> {name, path, parentId}
             lastUpdated: null,
-            refreshInterval: 15 * 60 * 1000 // 15 minutes
+            refreshInterval: 60 * 60 * 1000 // 1 hour
         };
     }
 
