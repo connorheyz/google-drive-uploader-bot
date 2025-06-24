@@ -157,7 +157,7 @@ client.once(Events.ClientReady, async (readyClient) => {
             } catch (error) {
                 console.error('⚠️ Failed to refresh folder cache:', error.message);
             }
-        }, 15 * 60 * 1000); // 15 minutes
+        }, 60 * 60 * 1000); // 15 minutes
         
     } catch (error) {
         console.error('⚠️ Failed to build initial folder cache:', error.message);
