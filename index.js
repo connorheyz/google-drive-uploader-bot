@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, Partials, StringSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, Partials, StringSelectMenuBuilder } = require('discord.js');
 const GoogleDriveService = require('./google-drive');
 
 // Initialize Discord client
@@ -26,11 +26,19 @@ const driveService = new GoogleDriveService();
 const UPLOAD_CHANNELS = process.env.UPLOAD_CHANNELS?.split(',') || [];
 const APPROVAL_CHANNEL_ID = process.env.APPROVAL_CHANNEL_ID;
 const UPLOAD_EMOJI = process.env.UPLOAD_EMOJI || '📤';
+const CACHE_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour
 
-// In-memory storage for upload requests
+// In-memory storage for upload requests (only needed for modal submissions due to Discord API limitations)
+// Main workflow is now fully stateless using DM message IDs as request IDs
 const uploadRequests = new Map();
 
-// Helper function to format file size
+// ================================
+// UTILITY FUNCTIONS
+// ================================
+
+/**
+ * Format file size in human-readable format
+ */
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -39,12 +47,28 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Helper function to generate unique request ID
-function generateRequestId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+/**
+ * Convert file size string back to bytes
+ */
+function parseFileSize(fileSizeStr) {
+    const sizeMatch = fileSizeStr?.match(/^([\d.]+)\s*(Bytes|KB|MB|GB)$/);
+    if (!sizeMatch) return 0;
+    
+    const value = parseFloat(sizeMatch[1]);
+    const unit = sizeMatch[2];
+    
+    switch (unit) {
+        case 'Bytes': return value;
+        case 'KB': return value * 1024;
+        case 'MB': return value * 1024 * 1024;
+        case 'GB': return value * 1024 * 1024 * 1024;
+        default: return 0;
+    }
 }
 
-// Helper function to extract filename from URL
+/**
+ * Extract filename from Discord CDN URL
+ */
 function getFileNameFromUrl(url) {
     try {
         const urlParts = url.split('/');
@@ -55,7 +79,33 @@ function getFileNameFromUrl(url) {
     }
 }
 
-// Helper function to send or update folder selection message
+/**
+ * Helper to extract field values from Discord embeds (eliminates code duplication)
+ */
+function getFieldValue(embed, fieldName) {
+    return embed.fields.find(f => f.name === fieldName)?.value;
+}
+
+/**
+ * Safe user DM with error handling
+ */
+async function safeDM(user, content) {
+    try {
+        await user.send(content);
+        return true;
+    } catch (error) {
+        console.log(`Could not DM user ${user.tag}: ${error.message}`);
+        return false;
+    }
+}
+
+// ================================
+// CORE FUNCTIONS
+// ================================
+
+/**
+ * Send or update folder selection message for upload workflow
+ */
 async function sendFolderSelectionMessage(user, requestId, interaction = null) {
     const request = uploadRequests.get(requestId);
     if (!request) return;
@@ -65,7 +115,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
     
     const embed = new EmbedBuilder()
         .setTitle('📤 Upload to Google Drive')
-        .setDescription(`**File:** ${request.originalFileName} (${formatFileSize(request.fileSize)})`)
+        .setDescription(`**File:** [${request.originalFileName}](${request.attachmentUrl}) (${formatFileSize(request.fileSize)})`)
         .addFields(
             { name: '📁 Current Location', value: request.currentPath || '*(Root)*', inline: true },
             { name: '📝 File Name', value: request.fileName, inline: true },
@@ -79,7 +129,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
     // Folder selection dropdown (if folders exist)
     if (folders.length > 0) {
         const selectMenu = new StringSelectMenuBuilder()
-            .setCustomId(`folder_select_${requestId}`)
+            .setCustomId(`dm_folder_select_${requestId}`)
             .setPlaceholder('📁 Choose a folder to navigate into...')
             .addOptions(folders);
 
@@ -93,7 +143,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
     if (request.currentPath) {
         buttonRow.addComponents(
             new ButtonBuilder()
-                .setCustomId(`folder_back_${requestId}`)
+                .setCustomId(`dm_folder_back_${requestId}`)
                 .setLabel('Back')
                 .setStyle(ButtonStyle.Secondary)
                 .setEmoji('⬅️')
@@ -103,7 +153,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
     // Edit file details button
     buttonRow.addComponents(
         new ButtonBuilder()
-            .setCustomId(`edit_details_${requestId}`)
+            .setCustomId(`dm_edit_details_${requestId}`)
             .setLabel('Edit Details')
             .setStyle(ButtonStyle.Secondary)
             .setEmoji('✏️')
@@ -112,7 +162,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
     // Confirm upload button
     buttonRow.addComponents(
         new ButtonBuilder()
-            .setCustomId(`confirm_upload_${requestId}`)
+            .setCustomId(`dm_confirm_upload_${requestId}`)
             .setLabel('Upload Here')
             .setStyle(ButtonStyle.Success)
             .setEmoji('✅')
@@ -129,14 +179,120 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
 
     const messageData = { embeds: [embed], components };
 
-    // If interaction is provided (from deferUpdate), edit the message
+    // Send or edit message
     if (interaction) {
         await interaction.editReply(messageData);
     } else {
-        // Otherwise send new message
         await user.send(messageData);
     }
 }
+
+/**
+ * Delete original DM message when request is processed (clean UX)
+ */
+async function deleteOriginalDM(userId, dmMessageId, requestId) {
+    try {
+        const user = client.users.cache.get(userId);
+        if (!user) return;
+
+        const dmChannel = await user.createDM();
+        
+        if (!dmMessageId) {
+            console.log('⚠️ No DM message ID provided for request:', requestId);
+            return;
+        }
+
+        const originalMessage = await dmChannel.messages.fetch(dmMessageId);
+        await originalMessage.delete();
+        console.log(`🗑️ Deleted original DM for request ${requestId}`);
+        
+    } catch (error) {
+        console.error('❌ Could not delete original DM:', error);
+        // Don't throw - the notification will still be sent
+    }
+}
+
+/**
+ * Extract upload request data from DM embed (stateless recovery)
+ */
+function extractRequestFromDMEmbed(embed, interaction) {
+    if (!embed || embed.title !== '📤 Upload to Google Drive') return null;
+    
+    // Extract data from visible fields
+    const currentPath = getFieldValue(embed, '📁 Current Location')?.replace('*(Root)*', '') || '';
+    const fileName = getFieldValue(embed, '📝 File Name');
+    const description = getFieldValue(embed, '📋 Description')?.replace('*(none)*', '') || '';
+    
+    // Parse original filename, URL, and file size from description
+    // Format: "**File:** [filename.ext](url) (X.X MB)"
+    const descMatch = embed.description?.match(/\*\*File:\*\* \[(.+?)\]\((.+?)\) \((.+?)\)/);
+    if (!descMatch) return null;
+    
+    const originalFileName = descMatch[1];
+    const attachmentUrl = descMatch[2];
+    const fileSize = parseFileSize(descMatch[3]);
+    
+    if (!attachmentUrl || !originalFileName) return null;
+    
+    return {
+        attachmentUrl,
+        fileSize,
+        userId: interaction.user.id,
+        originalFileName,
+        fileName,
+        description,
+        currentPath,
+        requestId: null // Will be set by caller
+    };
+}
+
+/**
+ * Create approval embed for officer channel
+ */
+function createApprovalEmbed(user, request, dmMessageId) {
+    return new EmbedBuilder()
+        .setTitle('📤 Upload Request for Approval')
+        .setDescription(`**${user.displayName}** wants to upload a file to Google Drive`)
+        .addFields(
+            { name: '👤 Requested by', value: `<@${user.id}>`, inline: true },
+            { name: '📁 File Name', value: request.fileName, inline: true },
+            { name: '📊 File Size', value: formatFileSize(request.fileSize), inline: true },
+            { name: '📂 Upload Path', value: request.currentPath || '*(root folder)*', inline: true },
+            { name: '🔗 Original File', value: request.attachmentUrl, inline: true },
+            { name: '📋 Description', value: request.description || '*(no description)*', inline: false }
+        )
+        .setColor(0xf39c12)
+        .setTimestamp()
+        .setFooter({ text: `Request ID: ${dmMessageId}` });
+}
+
+/**
+ * Create approval action buttons
+ */
+function createApprovalButtons(dmMessageId) {
+    return new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`approve_${dmMessageId}`)
+                .setLabel('Approve')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('✅'),
+            new ButtonBuilder()
+                .setCustomId(`deny_${dmMessageId}`)
+                .setLabel('Deny')
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('❌'),
+            new ButtonBuilder()
+                .setCustomId(`officer_edit_${dmMessageId}`)
+                .setLabel('Edit Details')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji('✏️')
+        );
+}
+
+// ================================
+// EVENT HANDLERS
+// ================================
 
 client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Discord Art Upload Bot is ready!`);
@@ -149,7 +305,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     try {
         await driveService.buildFolderCache();
         
-        // Set up periodic cache refresh (every 1 hour)
+        // Set up periodic cache refresh
         setInterval(async () => {
             try {
                 console.log('🔄 Refreshing folder cache...');
@@ -157,7 +313,7 @@ client.once(Events.ClientReady, async (readyClient) => {
             } catch (error) {
                 console.error('⚠️ Failed to refresh folder cache:', error.message);
             }
-        }, 60 * 60 * 1000); // 1 hour
+        }, CACHE_REFRESH_INTERVAL);
         
     } catch (error) {
         console.error('⚠️ Failed to build initial folder cache:', error.message);
@@ -166,13 +322,10 @@ client.once(Events.ClientReady, async (readyClient) => {
 
 // Handle message reactions (upload requests)
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-    
     // Ignore bot reactions
-    if (user.bot) {
-        return;
-    }
+    if (user.bot) return;
 
-    // Partial reaction handling
+    // Handle partial reactions and messages
     if (reaction.partial) {
         try {
             await reaction.fetch();
@@ -182,7 +335,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         }
     }
 
-    // Partial message handling (critical for old messages)
     if (reaction.message.partial) {
         try {
             await reaction.message.fetch();
@@ -197,23 +349,14 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         return;
     }
 
-    // Check if it's in an allowed upload channel
+    // Validation checks
     if (!UPLOAD_CHANNELS.includes(reaction.message.channel.id)) {
-        try {
-            await user.send('❌ Upload requests are only allowed in designated art channels.');
-        } catch (error) {
-            console.log(`Could not DM user ${user.tag}`);
-        }
+        await safeDM(user, '❌ Upload requests are only allowed in designated art channels.');
         return;
     }
 
-    // Check if message has attachments
     if (reaction.message.attachments.size === 0) {
-        try {
-            await user.send('❌ You can only upload messages that contain image attachments.');
-        } catch (error) {
-            console.log(`Could not DM user ${user.tag}`);
-        }
+        await safeDM(user, '❌ You can only upload messages that contain image attachments.');
         return;
     }
 
@@ -223,19 +366,13 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     );
 
     if (!attachment) {
-        try {
-            await user.send('❌ No image attachments found in that message.');
-        } catch (error) {
-            console.log(`Could not DM user ${user.tag}`);
-        }
+        await safeDM(user, '❌ No image attachments found in that message.');
         return;
     }
 
-    // Generate request ID and store basic info
-    const requestId = generateRequestId();
+    // Prepare request data
     const originalFileName = getFileNameFromUrl(attachment.url);
-    
-    uploadRequests.set(requestId, {
+    const request = {
         userId: user.id,
         messageId: reaction.message.id,
         channelId: reaction.message.channel.id,
@@ -244,40 +381,49 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         fileSize: attachment.size,
         contentType: attachment.contentType,
         timestamp: Date.now(),
-        // New fields for folder navigation
         currentPath: '',
         fileName: originalFileName,
         description: ''
-    });
+    };
 
-    // Send folder selection message to user
+    // Send folder selection message
     try {
+        // Use timestamp + user ID as temporary request ID
+        const requestId = Date.now().toString() + '_' + user.id;
+        request.requestId = requestId;
+        uploadRequests.set(requestId, request);
+        
         await sendFolderSelectionMessage(user, requestId);
     } catch (error) {
         console.error('❌ Error sending upload request to user:', error);
-        uploadRequests.delete(requestId);
     }
 });
 
-// Handle interactions (buttons, select menus, modals)
+// ================================
+// INTERACTION HANDLERS
+// ================================
+
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
 
+    // ================================
+    // DM WORKFLOW INTERACTIONS
+    // ================================
+
     // Handle folder selection (select menu)
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('folder_select_')) {
-        const requestId = interaction.customId.replace('folder_select_', '');
-        const request = uploadRequests.get(requestId);
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('dm_folder_select_')) {
+        const requestId = interaction.customId.replace('dm_folder_select_', '');
         
+        const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
         if (!request) {
             await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
             return;
         }
 
-        // Update current path
+        request.requestId = requestId;
         request.currentPath = interaction.values[0];
         uploadRequests.set(requestId, request);
 
-        // Update the message with new folder navigation
         await interaction.deferUpdate();
         try {
             await sendFolderSelectionMessage(interaction.user, requestId, interaction);
@@ -288,22 +434,21 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     // Handle back navigation
-    if (interaction.isButton() && interaction.customId.startsWith('folder_back_')) {
-        const requestId = interaction.customId.replace('folder_back_', '');
-        const request = uploadRequests.get(requestId);
+    if (interaction.isButton() && interaction.customId.startsWith('dm_folder_back_')) {
+        const requestId = interaction.customId.replace('dm_folder_back_', '');
         
+        const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
         if (!request) {
             await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
             return;
         }
 
-        // Go back one level
+        request.requestId = requestId;
         const pathParts = request.currentPath.split('/');
-        pathParts.pop(); // Remove last part
+        pathParts.pop();
         request.currentPath = pathParts.join('/');
         uploadRequests.set(requestId, request);
 
-        // Update the message
         await interaction.deferUpdate();
         try {
             await sendFolderSelectionMessage(interaction.user, requestId, interaction);
@@ -314,17 +459,20 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     // Handle edit details button
-    if (interaction.isButton() && interaction.customId.startsWith('edit_details_')) {
-        const requestId = interaction.customId.replace('edit_details_', '');
-        const request = uploadRequests.get(requestId);
+    if (interaction.isButton() && interaction.customId.startsWith('dm_edit_details_')) {
+        const requestId = interaction.customId.replace('dm_edit_details_', '');
         
+        const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
         if (!request) {
             await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
             return;
         }
+        
+        request.requestId = requestId;
+        uploadRequests.set(requestId, request);
 
         const modal = new ModalBuilder()
-            .setCustomId(`details_modal_${requestId}`)
+            .setCustomId(`dm_details_modal_${requestId}`)
             .setTitle('✏️ Edit Upload Details');
 
         const fileNameInput = new TextInputBuilder()
@@ -353,18 +501,21 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     // Handle confirm upload button
-    if (interaction.isButton() && interaction.customId.startsWith('confirm_upload_')) {
-        const requestId = interaction.customId.replace('confirm_upload_', '');
-        const request = uploadRequests.get(requestId);
+    if (interaction.isButton() && interaction.customId.startsWith('dm_confirm_upload_')) {
+        const requestId = interaction.customId.replace('dm_confirm_upload_', '');
         
+        const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
         if (!request) {
             await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
             return;
         }
+        
+        request.requestId = requestId;
+        uploadRequests.set(requestId, request);
 
         await interaction.deferReply({ ephemeral: true });
 
-        // Send approval request to approval channel
+        // Validate approval channel configuration
         if (!APPROVAL_CHANNEL_ID) {
             await interaction.editReply('❌ Approval channel not configured. Contact an administrator.');
             return;
@@ -376,51 +527,45 @@ client.on(Events.InteractionCreate, async interaction => {
             return;
         }
 
-        const approvalEmbed = new EmbedBuilder()
-            .setTitle('📤 Upload Request for Approval')
-            .setDescription(`**${interaction.user.displayName}** wants to upload a file to Google Drive`)
-            .addFields(
-                { name: '👤 Requested by', value: `<@${interaction.user.id}>`, inline: true },
-                { name: '📁 File Name', value: request.fileName, inline: true },
-                { name: '📊 File Size', value: formatFileSize(request.fileSize), inline: true },
-                { name: '📂 Upload Path', value: request.currentPath || '*(root folder)*', inline: true },
-                { name: '🔗 Original File', value: request.attachmentUrl, inline: true },
-                { name: '📋 Description', value: request.description || '*(no description)*', inline: false }
-            )
-            .setColor(0xf39c12)
-            .setTimestamp()
-            .setFooter({ text: `Request ID: ${requestId}` });
-
-        const approvalRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`approve_${requestId}`)
-                    .setLabel('Approve')
-                    .setStyle(ButtonStyle.Success)
-                    .setEmoji('✅'),
-                new ButtonBuilder()
-                    .setCustomId(`deny_${requestId}`)
-                    .setLabel('Deny')
-                    .setStyle(ButtonStyle.Danger)
-                    .setEmoji('❌'),
-                new ButtonBuilder()
-                    .setCustomId(`officer_edit_${requestId}`)
-                    .setLabel('Edit Details')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('✏️')
-            );
-
+        // Use DM message ID as the request ID for stateless operation
+        const dmMessageId = interaction.message.id;
+        
         try {
-            const approvalMessage = await approvalChannel.send({ 
+            // Send approval request
+            const approvalEmbed = createApprovalEmbed(interaction.user, request, dmMessageId);
+            const approvalButtons = createApprovalButtons(dmMessageId);
+            
+            await approvalChannel.send({ 
                 embeds: [approvalEmbed], 
-                components: [approvalRow] 
+                components: [approvalButtons] 
             });
             
-            request.approvalMessageId = approvalMessage.id;
-            request.uploadPath = request.currentPath; // Store final path
-            uploadRequests.set(requestId, request);
+            console.log(`📤 Upload request ${dmMessageId} sent for approval`);
 
-            await interaction.editReply('✅ Upload request submitted for approval! You\'ll be notified when it\'s processed.');
+            // Update original DM to show submission status
+            const submittedEmbed = new EmbedBuilder()
+                .setTitle('📤 Upload Request Submitted ✅')
+                .setDescription(`**File:** [${request.originalFileName}](${request.attachmentUrl}) (${formatFileSize(request.fileSize)})`)
+                .addFields(
+                    { name: '📂 Upload Location', value: request.currentPath || '*(Root)*', inline: true },
+                    { name: '📝 File Name', value: request.fileName, inline: true },
+                    { name: '🆔 Request ID', value: dmMessageId, inline: true },
+                    { name: '📋 Description', value: request.description || '*(none)*', inline: false },
+                    { name: '⏳ Status', value: 'Sent to officers for approval. You\'ll be notified when processed.', inline: false }
+                )
+                .setColor(0xf39c12)
+                .setTimestamp();
+
+            try {
+                await interaction.message.edit({ 
+                    embeds: [submittedEmbed], 
+                    components: [] // Remove buttons to prevent spam
+                });
+            } catch (error) {
+                console.error('❌ Could not edit original DM:', error);
+            }
+
+            await interaction.editReply('✅ Upload request submitted for approval! The message above has been updated.');
         } catch (error) {
             console.error('❌ Error sending approval request:', error);
             await interaction.editReply('❌ Error submitting request for approval. Contact an administrator.');
@@ -428,24 +573,22 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     // Handle details modal submission
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('details_modal_')) {
-        const requestId = interaction.customId.replace('details_modal_', '');
-        const request = uploadRequests.get(requestId);
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('dm_details_modal_')) {
+        const requestId = interaction.customId.replace('dm_details_modal_', '');
         
+        const request = uploadRequests.get(requestId);
         if (!request) {
-            await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+            await interaction.reply({ content: '❌ Upload session expired. Please start a new upload request.', ephemeral: true });
             return;
         }
 
         const fileName = interaction.fields.getTextInputValue('filename').trim();
         const description = interaction.fields.getTextInputValue('description').trim();
 
-        // Update request with form data
         request.fileName = fileName;
         request.description = description;
         uploadRequests.set(requestId, request);
 
-        // Update the folder selection message
         await interaction.deferUpdate();
         try {
             await sendFolderSelectionMessage(interaction.user, requestId, interaction);
@@ -455,31 +598,37 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     }
 
-    // Handle approval/denial buttons (from officer approval channel)
+    // ================================
+    // APPROVAL WORKFLOW INTERACTIONS
+    // ================================
+
+    // Handle approval/denial buttons
     if (interaction.isButton() && (interaction.customId.startsWith('approve_') || interaction.customId.startsWith('deny_'))) {
         const [action, requestId] = interaction.customId.split('_');
         
-        // Extract request information from the embed
         const embed = interaction.message.embeds[0];
         if (!embed) {
             await interaction.reply({ content: '❌ Could not find request information in message.', ephemeral: true });
             return;
         }
 
-        // Check if already processed (title indicates status)
+        // Check if already processed
         if (embed.title.includes('APPROVED') || embed.title.includes('DENIED')) {
             await interaction.reply({ content: '❌ This request has already been processed.', ephemeral: true });
             return;
         }
 
-        // Extract fields from embed
-        const getFieldValue = (name) => embed.fields.find(f => f.name === name)?.value;
+        // Extract request data from embed
+        const userId = getFieldValue(embed, '👤 Requested by')?.match(/<@(\d+)>/)?.[1];
+        const fileName = getFieldValue(embed, '📁 File Name');
+        const uploadPath = getFieldValue(embed, '📂 Upload Path')?.replace('*(root folder)*', '');
+        const description = getFieldValue(embed, '📋 Description')?.replace('*(no description)*', '');
+        const attachmentUrl = getFieldValue(embed, '🔗 Original File');
+        const fileSizeStr = getFieldValue(embed, '📊 File Size');
         
-        const userId = getFieldValue('👤 Requested by')?.match(/<@(\d+)>/)?.[1];
-        const fileName = getFieldValue('📁 File Name');
-        const uploadPath = getFieldValue('📂 Upload Path')?.replace('*(root folder)*', '');
-        const description = getFieldValue('📋 Description')?.replace('*(no description)*', '');
-        const attachmentUrl = getFieldValue('🔗 Original File');
+        const dmMessageId = requestId; // Request ID is the DM message ID
+        const originalFileName = getFileNameFromUrl(attachmentUrl);
+        const fileSize = parseFileSize(fileSizeStr);
 
         if (!userId || !fileName || !attachmentUrl) {
             await interaction.reply({ content: '❌ Missing required information in approval message.', ephemeral: true });
@@ -490,16 +639,13 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.deferReply({ ephemeral: true });
             
             try {
-                // Download file from Discord
+                // Download and upload file
                 const downloadResult = await driveService.downloadFile(attachmentUrl);
                 if (!downloadResult.success) {
                     throw new Error(downloadResult.error);
                 }
 
-                // Get folder ID for upload path (using cache)
                 const folderId = driveService.getCachedFolderIdByPath(uploadPath);
-
-                // Upload to Google Drive
                 const uploadResult = await driveService.uploadFile(
                     downloadResult.buffer,
                     fileName,
@@ -524,10 +670,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await interaction.message.edit({ 
                     embeds: [updatedEmbed], 
-                    components: [] // Remove buttons after processing
+                    components: []
                 });
 
-                // Notify requester
+                // Clean up: delete original DM and send notification
+                await deleteOriginalDM(userId, dmMessageId, dmMessageId);
+
                 const requester = client.users.cache.get(userId);
                 if (requester) {
                     const successEmbed = new EmbedBuilder()
@@ -542,7 +690,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         .setColor(0x27ae60)
                         .setTimestamp();
 
-                    await requester.send({ embeds: [successEmbed] });
+                    await safeDM(requester, { embeds: [successEmbed] });
                 }
 
                 await interaction.editReply('✅ Upload approved and completed successfully!');
@@ -557,7 +705,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await interaction.message.edit({ 
                     embeds: [errorEmbed], 
-                    components: [] // Remove buttons after processing
+                    components: []
                 });
 
                 await interaction.editReply(`❌ Error during upload: ${error.message}`);
@@ -574,10 +722,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.message.edit({ 
                 embeds: [updatedEmbed], 
-                components: [] // Remove buttons after processing
+                components: []
             });
 
-            // Notify requester
+            // Clean up: delete original DM and send notification
+            await deleteOriginalDM(userId, dmMessageId, dmMessageId);
+
             const requester = client.users.cache.get(userId);
             if (requester) {
                 const deniedEmbed = new EmbedBuilder()
@@ -587,24 +737,23 @@ client.on(Events.InteractionCreate, async interaction => {
                     .setColor(0xe74c3c)
                     .setTimestamp();
 
-                await requester.send({ embeds: [deniedEmbed] });
+                await safeDM(requester, { embeds: [deniedEmbed] });
             }
 
             await interaction.editReply('❌ Upload request denied.');
         }
     }
 
-    // Handle officer edit button (from approval message)  
+    // Handle officer edit button (legacy - still uses Map storage)
     if (interaction.isButton() && interaction.customId.startsWith('officer_edit_')) {
         const requestId = interaction.customId.replace('officer_edit_', '');
         const request = uploadRequests.get(requestId);
         
-                 if (!request) {
-             await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
-             return;
-         }
+        if (!request) {
+            await interaction.reply({ content: '❌ Upload request expired or not found.', ephemeral: true });
+            return;
+        }
 
-        // Show modal for editing upload details
         const modal = new ModalBuilder()
             .setCustomId(`edit_modal_${requestId}`)
             .setTitle('✏️ Edit Upload Details');
@@ -642,7 +791,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.showModal(modal);
     }
 
-    // Handle officer edit modal submission (from approval message)
+    // Handle officer edit modal submission (legacy - still uses Map storage)
     if (interaction.isModalSubmit() && interaction.customId.startsWith('edit_modal_')) {
         const requestId = interaction.customId.replace('edit_modal_', '');
         const request = uploadRequests.get(requestId);
@@ -658,13 +807,11 @@ client.on(Events.InteractionCreate, async interaction => {
         const uploadPath = interaction.fields.getTextInputValue('path').trim();
         const description = interaction.fields.getTextInputValue('description').trim();
 
-        // Update request
         request.fileName = fileName;
         request.uploadPath = uploadPath;
         request.description = description;
         uploadRequests.set(requestId, request);
 
-        // Update approval message
         const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
             .setFields(
                 { name: '👤 Requested by', value: `<@${request.userId}>`, inline: true },
@@ -681,7 +828,10 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 });
 
-// Error handling
+// ================================
+// ERROR HANDLING & STARTUP
+// ================================
+
 client.on(Events.Error, error => {
     console.error('❌ Discord client error:', error);
 });
