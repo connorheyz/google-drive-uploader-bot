@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, Partials, StringSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, Partials, StringSelectMenuBuilder, PermissionsBitField } = require('discord.js');
 const GoogleDriveService = require('./google-drive');
 
 // Initialize Discord client
@@ -25,7 +25,8 @@ const driveService = new GoogleDriveService();
 // Configuration
 const UPLOAD_CHANNELS = process.env.UPLOAD_CHANNELS?.split(',') || [];
 const APPROVAL_CHANNEL_ID = process.env.APPROVAL_CHANNEL_ID;
-const UPLOAD_EMOJI = process.env.UPLOAD_EMOJI || '📤';
+const UPLOAD_EMOJI = process.env.UPLOAD_EMOJI || '⬆️';
+const OFFICER_PERMISSION = process.env.OFFICER_PERMISSION || 'ManageMessages'; // Discord permission that grants upload access
 const CACHE_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour
 
 // In-memory storage for upload requests (only needed for modal submissions due to Discord API limitations)
@@ -97,6 +98,34 @@ async function safeDM(user, content) {
         console.log(`Could not DM user ${user.tag}: ${error.message}`);
         return false;
     }
+}
+
+/**
+ * Check if user can trigger upload requests (original author or officer)
+ */
+async function canTriggerUpload(user, message) {
+    // Check if user is the original message author
+    if (user.id === message.author.id) {
+        return { canUpload: true, reason: 'original_author' };
+    }
+
+    // Check officer permissions
+    try {
+        const guild = message.guild;
+        if (!guild) return { canUpload: false, reason: 'no_guild' };
+
+        const member = await guild.members.fetch(user.id);
+
+        // Check Discord permission
+        if (OFFICER_PERMISSION && member.permissions.has(PermissionsBitField.Flags[OFFICER_PERMISSION])) {
+            return { canUpload: true, reason: 'officer_permission' };
+        }
+
+    } catch (error) {
+        console.error('❌ Error checking user permissions:', error);
+    }
+
+    return { canUpload: false, reason: 'no_permission' };
 }
 
 // ================================
@@ -300,6 +329,18 @@ client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Upload channels: ${UPLOAD_CHANNELS.length}`);
     console.log(`Approval channel: ${APPROVAL_CHANNEL_ID || 'Not configured'}`);
     console.log(`Upload emoji: ${UPLOAD_EMOJI}`);
+    console.log(`Officer permission: ${OFFICER_PERMISSION || 'None configured'}`);
+    
+    // Validate officer permission
+    if (OFFICER_PERMISSION && !PermissionsBitField.Flags[OFFICER_PERMISSION]) {
+        console.error(`❌ Invalid OFFICER_PERMISSION: ${OFFICER_PERMISSION}`);
+        console.log('Valid permissions include: ManageMessages, ManageChannels, ModerateMembers, Administrator, etc.');
+        console.log('See Discord.js documentation for full list of permission flags.');
+    }
+    
+    if (!OFFICER_PERMISSION) {
+        console.log('⚠️ No officer permission configured - only original authors can trigger uploads');
+    }
     
     // Build initial folder cache
     try {
@@ -354,6 +395,17 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         await safeDM(user, '❌ Upload requests are only allowed in designated art channels.');
         return;
     }
+
+    // Check if user has permission to trigger upload requests
+    const permissionCheck = await canTriggerUpload(user, reaction.message);
+    if (!permissionCheck.canUpload) {
+        // Silently ignore reactions from users without permission
+        // This prevents spam while allowing people to react freely
+        console.log(`⚠️ Upload reaction ignored: ${user.tag} (${permissionCheck.reason}) on message ${reaction.message.id}`);
+        return;
+    }
+
+    console.log(`✅ Upload request initiated by ${user.tag} (${permissionCheck.reason}) on message ${reaction.message.id}`);
 
     if (reaction.message.attachments.size === 0) {
         await safeDM(user, '❌ You can only upload messages that contain image attachments.');
@@ -513,17 +565,15 @@ client.on(Events.InteractionCreate, async interaction => {
         request.requestId = requestId;
         uploadRequests.set(requestId, request);
 
-        await interaction.deferReply({ ephemeral: true });
-
         // Validate approval channel configuration
         if (!APPROVAL_CHANNEL_ID) {
-            await interaction.editReply('❌ Approval channel not configured. Contact an administrator.');
+            await interaction.reply({ content: '❌ Approval channel not configured. Contact an administrator.', ephemeral: true });
             return;
         }
 
         const approvalChannel = client.channels.cache.get(APPROVAL_CHANNEL_ID);
         if (!approvalChannel) {
-            await interaction.editReply('❌ Could not find approval channel. Contact an administrator.');
+            await interaction.reply({ content: '❌ Could not find approval channel. Contact an administrator.', ephemeral: true });
             return;
         }
 
@@ -565,10 +615,23 @@ client.on(Events.InteractionCreate, async interaction => {
                 console.error('❌ Could not edit original DM:', error);
             }
 
-            await interaction.editReply('✅ Upload request submitted for approval! The message above has been updated.');
+            // Send a temporary success message that gets deleted
+            const tempMessage = await interaction.reply({ 
+                content: '✅ Upload request submitted for approval! The message above has been updated.',
+                ephemeral: false // Make it a regular message so it can be deleted
+            });
+            
+            // Delete the temporary message after 2 seconds to reduce clutter
+            setTimeout(async () => {
+                try {
+                    await tempMessage.delete();
+                } catch (error) {
+                    // Ignore errors if message is already deleted or can't be deleted
+                }
+            }, 2000);
         } catch (error) {
             console.error('❌ Error sending approval request:', error);
-            await interaction.editReply('❌ Error submitting request for approval. Contact an administrator.');
+            await interaction.reply({ content: '❌ Error submitting request for approval. Contact an administrator.', ephemeral: true });
         }
     }
 
@@ -744,7 +807,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     }
 
-    // Handle officer edit button (legacy - still uses Map storage)
+    // Handle officer edit button
     if (interaction.isButton() && interaction.customId.startsWith('officer_edit_')) {
         const requestId = interaction.customId.replace('officer_edit_', '');
         const request = uploadRequests.get(requestId);
@@ -791,7 +854,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.showModal(modal);
     }
 
-    // Handle officer edit modal submission (legacy - still uses Map storage)
+    // Handle officer edit modal submission
     if (interaction.isModalSubmit() && interaction.customId.startsWith('edit_modal_')) {
         const requestId = interaction.customId.replace('edit_modal_', '');
         const request = uploadRequests.get(requestId);

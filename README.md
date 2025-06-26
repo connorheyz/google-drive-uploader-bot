@@ -75,6 +75,12 @@ APPROVAL_CHANNEL_ID=555666777888999000
 # Upload emoji (Unicode or custom emoji ID)
 UPLOAD_EMOJI=⬆️
 
+# Officer Permission System
+# Any user with this Discord permission can trigger uploads on any message
+# Common options: ManageMessages, ManageChannels, ModerateMembers, Administrator
+# Full list: https://discord.js.org/#/docs/discord.js/stable/class/PermissionsBitField?scrollTo=s-Flags
+OFFICER_PERMISSION=ManageMessages
+
 # Google Drive Configuration
 GOOGLE_CLIENT_ID=your_google_client_id_here
 GOOGLE_CLIENT_SECRET=your_google_client_secret_here
@@ -85,7 +91,34 @@ GOOGLE_REFRESH_TOKEN=your_google_refresh_token_here
 DEFAULT_DRIVE_FOLDER_ID=your_default_folder_id_here
 ```
 
-### 6. Running the Bot
+### 6. Permission System
+
+The bot implements smart permission checking to prevent spam and unintended upload requests:
+
+- **Original Authors**: Users can always trigger uploads on their own messages
+- **Officers**: Users with officer permissions can trigger uploads on any message
+- **Other Users**: Reactions from other users are silently ignored (no DM spam)
+
+**Officer Permission System:**
+
+Set `OFFICER_PERMISSION` to any Discord permission like:
+- `ManageMessages` - Users who can manage messages
+- `ManageChannels` - Users who can manage channels  
+- `ModerateMembers` - Users who can moderate members
+- `Administrator` - Server administrators
+
+Just assign the chosen permission to any role in your Discord server settings, and users with that role will automatically be able to trigger uploads.
+
+This allows people to react freely with the upload emoji without creating unwanted upload requests.
+
+**Setting up Officer Permissions:**
+1. In your Discord server, go to Server Settings → Roles
+2. Create a new role (e.g., "Art Officers") or select an existing role
+3. Enable the permission you configured (e.g., "Manage Messages")
+4. Assign this role to users who should be able to trigger uploads on any message
+5. No need to copy role IDs or modify the bot configuration!
+
+### 7. Running the Bot
 
 ```bash
 # Development (with auto-restart)
