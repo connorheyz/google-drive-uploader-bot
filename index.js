@@ -565,17 +565,15 @@ client.on(Events.InteractionCreate, async interaction => {
         request.requestId = requestId;
         uploadRequests.set(requestId, request);
 
-        await interaction.deferReply({ ephemeral: true });
-
         // Validate approval channel configuration
         if (!APPROVAL_CHANNEL_ID) {
-            await interaction.editReply('❌ Approval channel not configured. Contact an administrator.');
+            await interaction.reply({ content: '❌ Approval channel not configured. Contact an administrator.', ephemeral: true });
             return;
         }
 
         const approvalChannel = client.channels.cache.get(APPROVAL_CHANNEL_ID);
         if (!approvalChannel) {
-            await interaction.editReply('❌ Could not find approval channel. Contact an administrator.');
+            await interaction.reply({ content: '❌ Could not find approval channel. Contact an administrator.', ephemeral: true });
             return;
         }
 
@@ -617,19 +615,23 @@ client.on(Events.InteractionCreate, async interaction => {
                 console.error('❌ Could not edit original DM:', error);
             }
 
-            const replyMessage = await interaction.editReply('✅ Upload request submitted for approval! The message above has been updated.');
+            // Send a temporary success message that gets deleted
+            const tempMessage = await interaction.reply({ 
+                content: '✅ Upload request submitted for approval! The message above has been updated.',
+                ephemeral: false // Make it a regular message so it can be deleted
+            });
             
-            // Delete the reply message after 2 seconds to reduce clutter
+            // Delete the temporary message after 2 seconds to reduce clutter
             setTimeout(async () => {
                 try {
-                    await replyMessage.delete();
+                    await tempMessage.delete();
                 } catch (error) {
                     // Ignore errors if message is already deleted or can't be deleted
                 }
             }, 2000);
         } catch (error) {
             console.error('❌ Error sending approval request:', error);
-            await interaction.editReply('❌ Error submitting request for approval. Contact an administrator.');
+            await interaction.reply({ content: '❌ Error submitting request for approval. Contact an administrator.', ephemeral: true });
         }
     }
 
