@@ -200,9 +200,14 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null) {
 
     // Folder selection dropdown (if folders exist)
     if (folders.length > 0) {
+        // Contextual placeholder text based on current location
+        const placeholderText = request.currentPath 
+            ? '📁 Choose a subfolder to navigate into...'
+            : '📁 Choose a folder to navigate into...';
+
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId(`dm_folder_select_${requestId}`)
-            .setPlaceholder('📁 Choose a folder to navigate into...')
+            .setPlaceholder(placeholderText)
             .addOptions(folders);
 
         components.push(new ActionRowBuilder().addComponents(selectMenu));
