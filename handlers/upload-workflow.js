@@ -71,6 +71,15 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null, u
             .setEmoji('✅')
     );
 
+    // Cancel button (always available)
+    buttonRow.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`dm_cancel_${requestId}`)
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('❌')
+    );
+
     components.push(buttonRow);
 
     // Add folder status info

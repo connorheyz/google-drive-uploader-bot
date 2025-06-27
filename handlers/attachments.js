@@ -1,4 +1,4 @@
-const { EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder } = require('discord.js');
+const { EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { formatFileSize, getFileNameFromUrl } = require('../utils/helpers');
 
 /**
@@ -34,10 +34,19 @@ async function sendAttachmentSelectionMessage(user, message, attachments) {
         .setMaxValues(Math.min(attachments.length, 25))
         .addOptions(options);
 
-    const row = new ActionRowBuilder().addComponents(selectMenu);
+    const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+
+    // Cancel button
+    const cancelButton = new ButtonBuilder()
+        .setCustomId('dm_cancel_attachments')
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji('❌');
+
+    const buttonRow = new ActionRowBuilder().addComponents(cancelButton);
 
     try {
-        await user.send({ embeds: [embed], components: [row] });
+        await user.send({ embeds: [embed], components: [selectRow, buttonRow] });
     } catch (error) {
         console.error('❌ Error sending attachment selection message:', error);
         throw error;
