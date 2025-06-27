@@ -73,6 +73,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                 console.error('❌ Error navigating back:', error);
                 await interaction.followUp({ content: '❌ Error navigating back.', ephemeral: true });
             }
+            return;
         }
 
         // Handle edit details button
@@ -115,6 +116,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             );
 
             await interaction.showModal(modal);
+            return;
         }
 
         // Handle confirm upload button
@@ -163,7 +165,10 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                     .setTimestamp();
 
                 try {
-                    await interaction.message.edit({ 
+                    // Ensure we have the DM channel context (fixes post-restart cache issues)
+                    const dmChannel = await interaction.user.createDM();
+                    const message = await dmChannel.messages.fetch(interaction.message.id);
+                    await message.edit({ 
                         embeds: [submittedEmbed], 
                         components: [] // Remove buttons to prevent spam
                     });
@@ -173,8 +178,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
 
                 // Send a temporary success message that gets deleted
                 const tempMessage = await interaction.reply({ 
-                    content: '✅ Upload request submitted for approval! The message above has been updated.',
-                    ephemeral: false // Make it a regular message so it can be deleted
+                    content: '✅ Upload request submitted for approval! The message above has been updated.'
                 });
                 
                 // Delete the temporary message after 2 seconds to reduce clutter
@@ -190,6 +194,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                 console.error('❌ Error submitting approval request:', error);
                 await interaction.reply({ content: '❌ Error submitting request for approval. Contact an administrator.', ephemeral: true });
             }
+            return;
         }
 
         // Handle modal submissions for editing details
@@ -214,6 +219,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                 console.error('❌ Error updating details:', error);
                 await interaction.followUp({ content: '❌ Error updating details.', ephemeral: true });
             }
+            return;
         }
 
         // ================================
@@ -304,6 +310,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
 
                  await interaction.editReply(`❌ Error during upload: ${error.message}`);
              }
+             return;
         }
 
         // Handle denial button
@@ -368,6 +375,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                 console.error('❌ Error processing denial:', error);
                 await interaction.editReply(`❌ Error processing denial: ${error.message}`);
             }
+            return;
         }
 
         // Handle officer edit button
@@ -426,6 +434,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             );
 
             await interaction.showModal(modal);
+            return;
         }
 
         // Handle officer edit modal submission
@@ -468,6 +477,37 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
 
             await interaction.message.edit({ embeds: [updatedEmbed] });
             await interaction.editReply('✅ Upload details updated successfully!');
+            return;
+        }
+
+        // Handle cancel button for individual upload workflow
+        if (interaction.isButton() && interaction.customId.startsWith('dm_cancel_')) {
+            const requestId = interaction.customId.replace('dm_cancel_', '');
+            
+            // Clean up the upload request from memory
+            uploadRequests.delete(requestId);
+
+            // Update message to show cancellation
+            const cancelledEmbed = new EmbedBuilder()
+                .setTitle('❌ Upload Cancelled')
+                .setDescription('Upload request has been cancelled. You can start a new upload by reacting to an image with ⬆️.')
+                .setColor(0xe74c3c)
+                .setTimestamp();
+
+            await interaction.update({ embeds: [cancelledEmbed], components: [] });
+            return;
+        }
+
+        // Handle cancel button for attachment selection
+        if (interaction.isButton() && interaction.customId === 'dm_cancel_attachments') {
+            const cancelledEmbed = new EmbedBuilder()
+                .setTitle('❌ Upload Cancelled')
+                .setDescription('Attachment selection cancelled. You can start a new upload by reacting to an image with ⬆️.')
+                .setColor(0xe74c3c)
+                .setTimestamp();
+
+            await interaction.update({ embeds: [cancelledEmbed], components: [] });
+            return;
         }
     });
 }; 
