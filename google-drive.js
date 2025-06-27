@@ -128,6 +128,54 @@ class GoogleDriveService {
     }
 
     /**
+     * Upload file from URL to Google Drive (combines download and upload)
+     * @param {string} url - URL to download file from (Discord attachment)
+     * @param {string} fileName - Name for the file in Google Drive
+     * @param {string} folderPath - Path where to upload (e.g., "projects/game-art")
+     * @param {string} description - File description
+     * @param {Object} metadata - Additional metadata
+     * @returns {Promise<Object>} - Upload result
+     */
+    async uploadFromUrl(url, fileName, folderPath = '', description = '', metadata = {}) {
+        try {
+            // Download file from URL
+            const downloadResult = await this.downloadFile(url);
+            if (!downloadResult.success) {
+                throw new Error(`Failed to download file: ${downloadResult.error}`);
+            }
+
+            // Get folder ID for the specified path
+            const folderId = await this.getFolderIdByPath(folderPath);
+
+            // Prepare metadata
+            const fileMetadata = {
+                description: description,
+                ...metadata
+            };
+
+            // Upload to Google Drive
+            const uploadResult = await this.uploadFile(
+                downloadResult.buffer,
+                fileName,
+                downloadResult.mimeType,
+                folderId,
+                fileMetadata
+            );
+
+            if (!uploadResult.success) {
+                throw new Error(`Failed to upload file: ${uploadResult.error}`);
+            }
+
+            console.log(`✅ Successfully uploaded ${fileName} from URL to folder: ${folderPath || '(root)'}`);
+            return uploadResult;
+
+        } catch (error) {
+            console.error('❌ uploadFromUrl error:', error.message);
+            throw error;
+        }
+    }
+
+    /**
      * Get folder ID by path (creates folders if they don't exist)
      * @param {string} folderPath - Path like "projects/game-art/characters"
      * @param {string} parentId - Parent folder ID (optional)
