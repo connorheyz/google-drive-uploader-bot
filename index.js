@@ -133,6 +133,49 @@ async function canTriggerUpload(user, message) {
 // ================================
 
 /**
+ * Send attachment selection message for multiple attachments
+ */
+async function sendAttachmentSelectionMessage(user, message, attachments) {
+    const embed = new EmbedBuilder()
+        .setTitle('🖼️ Multiple Attachments Found')
+        .setDescription(`This message contains **${attachments.length}** images. Select which ones you'd like to upload to Google Drive.\n\n*You can select multiple attachments and each will go through the upload process individually.*${attachments.length > 25 ? '\n\n⚠️ **Note:** Only the first 25 attachments are shown due to Discord limits.' : ''}`)
+        .setColor(0x3498db)
+        .setTimestamp()
+        .setFooter({ 
+            text: `${message.id}|${message.channel.id}` 
+        });
+
+    // Create options for select menu (max 25 options due to Discord limits)
+    const options = attachments.slice(0, 25).map((attachment, index) => {
+        const fileName = getFileNameFromUrl(attachment.url);
+        const fileSize = formatFileSize(attachment.size);
+        
+        return {
+            label: fileName.length > 100 ? fileName.substring(0, 97) + '...' : fileName,
+            description: `${fileSize} • Click to select for upload`,
+            value: `attachment_${index}`,
+            emoji: '🖼️'
+        };
+    });
+
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`attachment_select_stateless`)
+        .setPlaceholder('📂 Choose attachments to upload...')
+        .setMinValues(1)
+        .setMaxValues(Math.min(attachments.length, 25))
+        .addOptions(options);
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    try {
+        await user.send({ embeds: [embed], components: [row] });
+    } catch (error) {
+        console.error('❌ Error sending attachment selection message:', error);
+        throw error;
+    }
+}
+
+/**
  * Send or update folder selection message for upload workflow
  */
 async function sendFolderSelectionMessage(user, requestId, interaction = null) {
@@ -412,42 +455,51 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         return;
     }
 
-    // Get the first image attachment
-    const attachment = reaction.message.attachments.find(att => 
+    // Get all image attachments
+    const imageAttachments = Array.from(reaction.message.attachments.values()).filter(att => 
         att.contentType && att.contentType.startsWith('image/')
     );
 
-    if (!attachment) {
+    if (imageAttachments.length === 0) {
         await safeDM(user, '❌ No image attachments found in that message.');
         return;
     }
 
-    // Prepare request data
-    const originalFileName = getFileNameFromUrl(attachment.url);
-    const request = {
-        userId: user.id,
-        messageId: reaction.message.id,
-        channelId: reaction.message.channel.id,
-        attachmentUrl: attachment.url,
-        originalFileName: originalFileName,
-        fileSize: attachment.size,
-        contentType: attachment.contentType,
-        timestamp: Date.now(),
-        currentPath: '',
-        fileName: originalFileName,
-        description: ''
-    };
+    // Handle single attachment - direct to upload flow
+    if (imageAttachments.length === 1) {
+        const attachment = imageAttachments[0];
+        const originalFileName = getFileNameFromUrl(attachment.url);
+        const request = {
+            userId: user.id,
+            messageId: reaction.message.id,
+            channelId: reaction.message.channel.id,
+            attachmentUrl: attachment.url,
+            originalFileName: originalFileName,
+            fileSize: attachment.size,
+            contentType: attachment.contentType,
+            timestamp: Date.now(),
+            currentPath: '',
+            fileName: originalFileName,
+            description: ''
+        };
 
-    // Send folder selection message
+        try {
+            const requestId = Date.now().toString() + '_' + user.id;
+            request.requestId = requestId;
+            uploadRequests.set(requestId, request);
+            
+            await sendFolderSelectionMessage(user, requestId);
+        } catch (error) {
+            console.error('❌ Error sending upload request to user:', error);
+        }
+        return;
+    }
+
+    // Handle multiple attachments - show selection menu
     try {
-        // Use timestamp + user ID as temporary request ID
-        const requestId = Date.now().toString() + '_' + user.id;
-        request.requestId = requestId;
-        uploadRequests.set(requestId, request);
-        
-        await sendFolderSelectionMessage(user, requestId);
+        await sendAttachmentSelectionMessage(user, reaction.message, imageAttachments);
     } catch (error) {
-        console.error('❌ Error sending upload request to user:', error);
+        console.error('❌ Error sending attachment selection to user:', error);
     }
 });
 
@@ -461,6 +513,126 @@ client.on(Events.InteractionCreate, async interaction => {
     // ================================
     // DM WORKFLOW INTERACTIONS
     // ================================
+
+    // Handle attachment selection for multiple attachments (stateless)
+    if (interaction.isStringSelectMenu() && interaction.customId === 'attachment_select_stateless') {
+        await interaction.deferReply();
+
+        try {
+            const embed = interaction.message.embeds[0];
+            if (!embed || !embed.footer) {
+                await interaction.editReply('❌ Attachment selection message malformed.');
+                return;
+            }
+
+            // Extract source message info from footer
+            const footerText = embed.footer.text;
+            const [originalMessageId, originalChannelId] = footerText.split('|');
+
+            if (!originalMessageId || !originalChannelId) {
+                await interaction.editReply('❌ Source message information not found.');
+                return;
+            }
+
+            // Fetch the original message to get current attachments
+            let originalMessage = null;
+            try {
+                const channel = await client.channels.fetch(originalChannelId);
+                if (channel) {
+                    originalMessage = await channel.messages.fetch(originalMessageId);
+                }
+            } catch (error) {
+                console.log('❌ Could not fetch original message:', error.message);
+            }
+
+            if (!originalMessage) {
+                await interaction.editReply('❌ Original message not found or was deleted. Attachment data is no longer available.');
+                return;
+            }
+
+            // Get current image attachments
+            const imageAttachments = Array.from(originalMessage.attachments.values()).filter(att => 
+                att.contentType && att.contentType.startsWith('image/')
+            );
+
+            if (imageAttachments.length === 0) {
+                await interaction.editReply('❌ No image attachments found in the original message.');
+                return;
+            }
+
+            // Map attachments to expected format
+            const attachments = imageAttachments.slice(0, 25).map((attachment, index) => ({
+                index,
+                fileName: getFileNameFromUrl(attachment.url),
+                url: attachment.url,
+                size: attachment.size,
+                contentType: attachment.contentType
+            }));
+
+            // Process selected attachments
+            const selectedIndices = interaction.values.map(value => parseInt(value.replace('attachment_', '')));
+            const selectedAttachments = selectedIndices.map(index => attachments[index]).filter(Boolean);
+
+            if (selectedAttachments.length === 0) {
+                await interaction.editReply('❌ No valid attachments selected.');
+                return;
+            }
+
+            await interaction.editReply(`✅ Processing ${selectedAttachments.length} attachment(s). You'll receive a separate message for each upload.`);
+
+            // Disable the original selection message to prevent duplicate requests
+            try {
+                const processedEmbed = new EmbedBuilder()
+                    .setTitle('✅ Attachments Processed')
+                    .setDescription(`Successfully processed **${selectedAttachments.length}** attachment(s). Each will go through the individual upload workflow.`)
+                    .setColor(0x2ecc71)
+                    .setTimestamp();
+
+                // Ensure we have the DM channel context (fixes post-restart cache issues)
+                const dmChannel = await interaction.user.createDM();
+                const message = await dmChannel.messages.fetch(interaction.message.id);
+                await message.edit({ embeds: [processedEmbed], components: [] });
+            } catch (error) {
+                console.log('❌ Could not update original selection message:', error.message);
+                // Not critical - user still gets confirmation via the reply
+            }
+
+            // Create upload request for each selected attachment
+            for (let i = 0; i < selectedAttachments.length; i++) {
+                const attachment = selectedAttachments[i];
+                
+                const request = {
+                    userId: interaction.user.id,
+                    messageId: originalMessageId,
+                    channelId: originalChannelId,
+                    attachmentUrl: attachment.url,
+                    originalFileName: attachment.fileName,
+                    fileSize: attachment.size,
+                    contentType: attachment.contentType,
+                    timestamp: Date.now(),
+                    currentPath: '',
+                    fileName: attachment.fileName,
+                    description: ''
+                };
+
+                // Small delay between messages to avoid rate limits
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                const requestId = (Date.now() + i).toString() + '_' + interaction.user.id;
+                request.requestId = requestId;
+                uploadRequests.set(requestId, request);
+                
+                await sendFolderSelectionMessage(interaction.user, requestId);
+            }
+
+        } catch (error) {
+            console.error('❌ Error processing attachment selection:', error);
+            await interaction.editReply('❌ Error processing attachment selection.');
+        }
+        return;
+    }
 
     // Handle folder selection (select menu)
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('dm_folder_select_')) {
