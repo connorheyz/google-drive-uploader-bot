@@ -164,21 +164,21 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     console.log(`✅ Upload request initiated by ${user.tag} (${permissionCheck.reason}) on message ${reaction.message.id}`);
 
     if (reaction.message.attachments.size === 0) {
-        await safeDM(user, '❌ You can only upload messages that contain image attachments.');
+        await safeDM(user, '❌ You can only upload messages that contain file attachments.');
         return;
     }
 
-    // Get all image attachments
-    const imageAttachments = Array.from(reaction.message.attachments.values());
+    // Get all attachments
+    const attachments = Array.from(reaction.message.attachments.values());
 
-    if (imageAttachments.length === 0) {
-        await safeDM(user, '❌ No image attachments found in that message.');
+    if (attachments.length === 0) {
+        await safeDM(user, '❌ No file attachments found in that message.');
         return;
     }
 
     // Handle single attachment - direct to upload flow
-    if (imageAttachments.length === 1) {
-        const attachment = imageAttachments[0];
+    if (attachments.length === 1) {
+        const attachment = attachments[0];
         const originalFileName = getFileNameFromUrl(attachment.url);
         const request = {
             userId: user.id,
@@ -208,7 +208,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
     // Handle multiple attachments - show selection menu
     try {
-        await sendAttachmentSelectionMessage(user, reaction.message, imageAttachments);
+        await sendAttachmentSelectionMessage(user, reaction.message, attachments);
     } catch (error) {
         console.error('❌ Error sending attachment selection to user:', error);
     }
