@@ -7,7 +7,7 @@ const { formatFileSize, getFileNameFromUrl } = require('../utils/helpers');
 async function sendAttachmentSelectionMessage(user, message, attachments) {
     const embed = new EmbedBuilder()
         .setTitle('🖼️ Multiple Attachments Found')
-        .setDescription(`This message contains **${attachments.length}** images. Select which ones you'd like to upload to Google Drive.\n\n*You can select multiple attachments and each will go through the upload process individually.*${attachments.length > 25 ? '\n\n⚠️ **Note:** Only the first 25 attachments are shown due to Discord limits.' : ''}`)
+        .setDescription(`This message contains **${attachments.length}** files. Select which ones you'd like to upload to Google Drive.\n\n*You can select multiple attachments and each will go through the upload process individually.*${attachments.length > 25 ? '\n\n⚠️ **Note:** Only the first 25 attachments are shown due to Discord limits.' : ''}`)
         .setColor(0x3498db)
         .setTimestamp()
         .setFooter({ 
@@ -91,16 +91,16 @@ async function handleAttachmentSelection(interaction, client, uploadRequests, se
             return;
         }
 
-        // Get current image attachments
-        const imageAttachments = Array.from(originalMessage.attachments.values());
+        // Get current attachments
+        const currentAttachments = Array.from(originalMessage.attachments.values());
 
-        if (imageAttachments.length === 0) {
-            await interaction.editReply('❌ No image attachments found in the original message.');
+        if (currentAttachments.length === 0) {
+            await interaction.editReply('❌ No file attachments found in the original message.');
             return;
         }
 
         // Map attachments to expected format
-        const attachments = imageAttachments.slice(0, 25).map((attachment, index) => ({
+        const attachments = currentAttachments.slice(0, 25).map((attachment, index) => ({
             index,
             fileName: getFileNameFromUrl(attachment.url),
             url: attachment.url,
