@@ -1,10 +1,15 @@
 {
   "uploadChannels": [
-    "1386442807295741992"
+    "1386442807295741992",
+    "1390810853434986608"
   ],
-  "approvalChannelId": "1386442856566231071",
+  "defaultApprovalChannelId": "1386442856566231071",
+  "approvalMappings": {
+    "1390810853434986608": "1390810914239807590"
+  },
   "uploadEmoji": "⬆️",
   "officerPermission": "ManageMessages",
   "rootFolderId": "19hKljSBO4iZjxaEN5_8930OM2JQl-0Mt",
-  "cacheRefreshInterval": 3600000
+  "cacheRefreshInterval": 3600000,
+  "approvalChannelId": "1386442856566231071"
 }

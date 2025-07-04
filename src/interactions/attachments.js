@@ -92,9 +92,7 @@ async function handleAttachmentSelection(interaction, client, uploadRequests, se
         }
 
         // Get current image attachments
-        const imageAttachments = Array.from(originalMessage.attachments.values()).filter(att => 
-            att.contentType && att.contentType.startsWith('image/')
-        );
+        const imageAttachments = Array.from(originalMessage.attachments.values());
 
         if (imageAttachments.length === 0) {
             await interaction.editReply('❌ No image attachments found in the original message.');

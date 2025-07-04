@@ -6,7 +6,8 @@ const CONFIG_FILE = path.join(__dirname, '..', '..', 'config', 'config.json');
 // Default configuration
 const DEFAULT_CONFIG = {
     uploadChannels: [],
-    approvalChannelId: "",
+    defaultApprovalChannelId: "",
+    approvalMappings: {}, // uploadChannelId -> approvalChannelId
     uploadEmoji: "⬆️",
     officerPermission: "ManageMessages",
     rootFolderId: "",
@@ -114,6 +115,33 @@ async function removeFromArray(key, value) {
     return true; // Didn't exist
 }
 
+/**
+ * Set approval mapping for an upload channel
+ */
+async function setApprovalMapping(uploadChannelId, approvalChannelId) {
+    if (!currentConfig.approvalMappings) currentConfig.approvalMappings = {};
+    currentConfig.approvalMappings[uploadChannelId] = approvalChannelId;
+    return await saveConfig();
+}
+
+/**
+ * Remove approval mapping
+ */
+async function removeApprovalMapping(uploadChannelId) {
+    if (currentConfig.approvalMappings && currentConfig.approvalMappings[uploadChannelId]) {
+        delete currentConfig.approvalMappings[uploadChannelId];
+        return await saveConfig();
+    }
+    return true;
+}
+
+function getApprovalChannelFor(uploadChannelId) {
+    if (currentConfig.approvalMappings && currentConfig.approvalMappings[uploadChannelId]) {
+        return currentConfig.approvalMappings[uploadChannelId];
+    }
+    return currentConfig.defaultApprovalChannelId;
+}
+
 module.exports = {
     loadConfig,
     saveConfig,
@@ -123,5 +151,8 @@ module.exports = {
     set,
     addToArray,
     removeFromArray,
+    setApprovalMapping,
+    removeApprovalMapping,
+    getApprovalChannelFor,
     DEFAULT_CONFIG
 }; 

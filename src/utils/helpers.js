@@ -118,6 +118,10 @@ async function deleteOriginalDM(client, userId, dmMessageId, requestId) {
     }
 }
 
+function getApprovalChannelId(config, uploadChannelId) {
+    return config.getApprovalChannelFor(uploadChannelId);
+}
+
 module.exports = {
     formatFileSize,
     parseFileSize,
@@ -125,5 +129,6 @@ module.exports = {
     getFieldValue,
     safeDM,
     canTriggerUpload,
-    deleteOriginalDM
+    deleteOriginalDM,
+    getApprovalChannelId
 }; 

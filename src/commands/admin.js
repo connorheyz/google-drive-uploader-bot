@@ -63,14 +63,30 @@ function createAdminCommands() {
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     );
 
-    // Set approval channel
+    // Set default approval channel
     commands.push(
         new SlashCommandBuilder()
-            .setName('set-approval-channel')
-            .setDescription('Set the channel where upload requests are sent for approval')
+            .setName('set-default-approval-channel')
+            .setDescription('Set the channel where upload requests are sent when no custom mapping is defined')
             .addChannelOption(option =>
                 option.setName('channel')
-                    .setDescription('The approval channel')
+                    .setDescription('The default approval channel')
+                    .setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    );
+
+    // Map upload channel -> approval channel
+    commands.push(
+        new SlashCommandBuilder()
+            .setName('map-approval-channel')
+            .setDescription('Map a specific upload channel to its own approval channel')
+            .addChannelOption(option =>
+                option.setName('upload_channel')
+                    .setDescription('Channel where users react to upload')
+                    .setRequired(true))
+            .addChannelOption(option =>
+                option.setName('approval_channel')
+                    .setDescription('Channel where requests from this upload channel go')
                     .setRequired(true))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     );
@@ -158,8 +174,11 @@ async function handleAdminCommand(interaction, driveService) {
             case 'remove-upload-channel':
                 await handleRemoveUploadChannel(interaction);
                 break;
-            case 'set-approval-channel':
-                await handleSetApprovalChannel(interaction);
+            case 'set-default-approval-channel':
+                await handleSetDefaultApprovalChannel(interaction);
+                break;
+            case 'map-approval-channel':
+                await handleMapApprovalChannel(interaction);
                 break;
             case 'refresh-folders':
                 await handleRefreshFolders(interaction, driveService);
@@ -217,12 +236,17 @@ async function handleRemoveUploadChannel(interaction) {
     }
 }
 
-async function handleSetApprovalChannel(interaction) {
+async function handleSetDefaultApprovalChannel(interaction) {
     const channel = interaction.options.getChannel('channel');
-    
-    await config.set('approvalChannelId', channel.id);
-    
-    await interaction.editReply(`✅ Approval channel set to: ${channel}`);
+    await config.set('defaultApprovalChannelId', channel.id);
+    await interaction.editReply(`✅ Default approval channel set to: ${channel}`);
+}
+
+async function handleMapApprovalChannel(interaction) {
+    const uploadChannel = interaction.options.getChannel('upload_channel');
+    const approvalChannel = interaction.options.getChannel('approval_channel');
+    await config.setApprovalMapping(uploadChannel.id, approvalChannel.id);
+    await interaction.editReply(`✅ Mapped ${uploadChannel} → ${approvalChannel} for approvals.`);
 }
 
 async function handleRefreshFolders(interaction, driveService) {
@@ -343,7 +367,8 @@ async function handleShowConfig(interaction) {
         .addFields(
             { name: '📤 Upload Emoji', value: currentConfig.uploadEmoji || '*(not set)*', inline: true },
             { name: '📋 Upload Channels', value: currentConfig.uploadChannels.length > 0 ? currentConfig.uploadChannels.map(id => `<#${id}>`).join('\n') : '*(none)*', inline: true },
-            { name: '✅ Approval Channel', value: currentConfig.approvalChannelId ? `<#${currentConfig.approvalChannelId}>` : '*(not set)*', inline: true },
+            { name: '✅ Default Approval', value: currentConfig.defaultApprovalChannelId ? `<#${currentConfig.defaultApprovalChannelId}>` : '*(not set)*', inline: true },
+            { name: '📑 Channel Mappings', value: Object.keys(currentConfig.approvalMappings||{}).length > 0 ? Object.entries(currentConfig.approvalMappings).map(([u,a])=>`<#${u}> → <#${a}>`).join('\n') : '*(none)*', inline: false },
             { name: '👮 Officer Permission', value: currentConfig.officerPermission, inline: true },
             { name: '📁 Root Folder ID', value: currentConfig.rootFolderId || '*(not set)*', inline: true },
             { name: '🔄 Cache Refresh Interval', value: `${Math.round(currentConfig.cacheRefreshInterval / 60000)} minutes`, inline: true }

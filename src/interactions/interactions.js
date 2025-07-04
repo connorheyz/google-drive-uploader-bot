@@ -135,7 +135,9 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             try {
                 // Send approval request to officer channel
                 const config = require('../utils/config');
-                const approvalChannel = client.channels.cache.get(config.get('approvalChannelId'));
+                const { getApprovalChannelFor } = config;
+                const approvalId = getApprovalChannelFor(request.channelId || interaction.channelId);
+                const approvalChannel = approvalId ? client.channels.cache.get(approvalId) : null;
                 if (!approvalChannel) {
                     await interaction.reply({ content: '❌ Approval channel not configured. Please contact an administrator.', flags: MessageFlags.Ephemeral });
                     return;

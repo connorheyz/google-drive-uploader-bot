@@ -52,7 +52,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Discord Art Upload Bot is ready!`);
     console.log(`Logged in as ${readyClient.user.tag}`);
     console.log(`Upload channels: ${config.get('uploadChannels').length}`);
-    console.log(`Approval channel: ${config.get('approvalChannelId') || 'Not configured'}`);
+    console.log(`Default approval channel: ${config.get('defaultApprovalChannelId') || 'Not configured'}`);
     console.log(`Upload emoji: ${config.get('uploadEmoji')}`);
     console.log(`Officer permission: ${config.get('officerPermission')}`);
     console.log(`Root folder ID: ${config.get('rootFolderId') || 'Not configured'}`);
@@ -169,9 +169,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     }
 
     // Get all image attachments
-    const imageAttachments = Array.from(reaction.message.attachments.values()).filter(att => 
-        att.contentType && att.contentType.startsWith('image/')
-    );
+    const imageAttachments = Array.from(reaction.message.attachments.values());
 
     if (imageAttachments.length === 0) {
         await safeDM(user, '❌ No image attachments found in that message.');
@@ -222,7 +220,7 @@ client.on(Events.InteractionCreate, async interaction => {
     
     const adminCommands = [
         'set-upload-emoji', 'add-upload-channel', 'remove-upload-channel',
-        'set-approval-channel', 'refresh-folders', 'set-root-folder', 'show-config', 'google-auth-start', 'google-auth-finish'
+        'set-default-approval-channel', 'map-approval-channel', 'refresh-folders', 'set-root-folder', 'show-config', 'google-auth-start', 'google-auth-finish'
     ];
     
     if (adminCommands.includes(interaction.commandName)) {
