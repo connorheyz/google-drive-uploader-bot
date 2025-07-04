@@ -10,7 +10,6 @@ const DEFAULT_CONFIG = {
     uploadEmoji: "⬆️",
     officerPermission: "ManageMessages",
     rootFolderId: "",
-    rootFolderName: "",
     cacheRefreshInterval: 3600000 // 1 hour in milliseconds
 };
 

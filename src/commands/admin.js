@@ -256,11 +256,8 @@ async function handleSetRootFolder(interaction, driveService) {
             return;
         }
         
-        // Update configuration
-        await config.updateConfig({
-            rootFolderId: folderId,
-            rootFolderName: folderInfo.name
-        });
+        // Update configuration (only ID)
+        await config.set('rootFolderId', folderId);
         
         // Refresh folder cache with new root
         await driveService.setRootFolder(folderId);
@@ -348,7 +345,7 @@ async function handleShowConfig(interaction) {
             { name: '📋 Upload Channels', value: currentConfig.uploadChannels.length > 0 ? currentConfig.uploadChannels.map(id => `<#${id}>`).join('\n') : '*(none)*', inline: true },
             { name: '✅ Approval Channel', value: currentConfig.approvalChannelId ? `<#${currentConfig.approvalChannelId}>` : '*(not set)*', inline: true },
             { name: '👮 Officer Permission', value: currentConfig.officerPermission, inline: true },
-            { name: '📁 Root Folder', value: currentConfig.rootFolderName || '*(not set)*', inline: true },
+            { name: '📁 Root Folder ID', value: currentConfig.rootFolderId || '*(not set)*', inline: true },
             { name: '🔄 Cache Refresh Interval', value: `${Math.round(currentConfig.cacheRefreshInterval / 60000)} minutes`, inline: true }
         )
         .setTimestamp();

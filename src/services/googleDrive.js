@@ -191,11 +191,14 @@ class GoogleDriveService {
      */
     async getFolderIdByPath(folderPath, parentId = null) {
         if (!folderPath || folderPath === '/') {
-            return parentId || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
+            const rid = config.get('rootFolderId');
+            if (!rid) throw new Error('Root folder not configured');
+            return rid;
         }
 
         const pathParts = folderPath.split('/').filter(part => part.length > 0);
-        let currentParentId = parentId || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
+        let currentParentId = parentId || config.get('rootFolderId');
+        if (!currentParentId) throw new Error('Root folder not configured');
 
         for (const folderName of pathParts) {
             try {
@@ -237,8 +240,10 @@ class GoogleDriveService {
     async buildFolderCache(rootFolderId = null) {
         try {
             // Use config root folder if set, otherwise fall back to env or 'root'
-            const config = require('../utils/config');
-            const rootId = rootFolderId || config.get('rootFolderId') || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
+            const rootId = rootFolderId || config.get('rootFolderId');
+            if (!rootId) {
+                throw new Error('Root folder not configured. Set one with /set-root-folder');
+            }
             console.log('📁 Building folder cache from Google Drive...');
             console.log(`🔒 Restricting to root folder: ${rootId}`);
             
@@ -485,8 +490,9 @@ class GoogleDriveService {
     getCachedFolderIdByPath(folderPath) {
         if (!folderPath || folderPath === '/') {
             // Use config root folder if set, otherwise fall back to env or 'root'
-            const config = require('../utils/config');
-            return config.get('rootFolderId') || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
+            const rid = config.get('rootFolderId');
+            if (!rid) throw new Error('Root folder not configured');
+            return rid;
         }
 
         // Find folder in flat cache by path

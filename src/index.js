@@ -10,60 +10,6 @@ const { sendFolderSelectionMessage, extractRequestFromDMEmbed } = require('./int
 const { createApprovalEmbed, createApprovalButtons } = require('./interactions/approval');
 const { createAdminCommands, handleAdminCommand } = require('./commands/admin');
 
-// Utility function to clean up duplicate commands
-async function cleanupDuplicateCommands(rest, clientId, guildId = null) {
-    try {
-        console.log(`🔍 Checking for duplicate commands... (Guild: ${guildId || 'Global'})`);
-        
-        let existingCommands;
-        if (guildId) {
-            existingCommands = await rest.get(Routes.applicationGuildCommands(clientId, guildId));
-        } else {
-            existingCommands = await rest.get(Routes.applicationCommands(clientId));
-        }
-
-        console.log(`📋 Found ${existingCommands.length} existing commands:`);
-        existingCommands.forEach(cmd => {
-            console.log(`   - ${cmd.name} (ID: ${cmd.id})`);
-        });
-
-        // Group commands by name to find duplicates
-        const commandGroups = existingCommands.reduce((groups, cmd) => {
-            if (!groups[cmd.name]) groups[cmd.name] = [];
-            groups[cmd.name].push(cmd);
-            return groups;
-        }, {});
-
-        // Delete duplicates (keep the first one of each name)
-        let duplicatesFound = false;
-        for (const [name, commands] of Object.entries(commandGroups)) {
-            if (commands.length > 1) {
-                duplicatesFound = true;
-                console.log(`🧹 Found ${commands.length} duplicate commands for "${name}", cleaning up...`);
-                // Delete all but the first one
-                for (let i = 1; i < commands.length; i++) {
-                    console.log(`🗑️ Deleting duplicate command "${name}" (ID: ${commands[i].id})`);
-                    if (guildId) {
-                        await rest.delete(Routes.applicationGuildCommand(clientId, guildId, commands[i].id));
-                    } else {
-                        await rest.delete(Routes.applicationCommand(clientId, commands[i].id));
-                    }
-                    console.log(`✅ Deleted duplicate command "${name}"`);
-                }
-            }
-        }
-        
-        if (duplicatesFound) {
-            console.log('✅ All duplicate commands cleaned up successfully');
-        } else {
-            console.log('✅ No duplicate commands found');
-        }
-    } catch (error) {
-        console.error('❌ Error cleaning up duplicate commands:', error);
-        console.error('Full error details:', error.stack);
-    }
-}
-
 // Initialize Discord client
 const client = new Client({
     intents: [
@@ -109,7 +55,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Approval channel: ${config.get('approvalChannelId') || 'Not configured'}`);
     console.log(`Upload emoji: ${config.get('uploadEmoji')}`);
     console.log(`Officer permission: ${config.get('officerPermission')}`);
-    console.log(`Root folder: ${config.get('rootFolderName') || 'Not configured'}`);
+    console.log(`Root folder ID: ${config.get('rootFolderId') || 'Not configured'}`);
     
     // Validate officer permission
     const officerPermission = config.get('officerPermission');
@@ -144,7 +90,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     if (rootFolderId) {
         try {
             await driveService.setRootFolder(rootFolderId);
-            console.log(`📁 Using root folder: ${config.get('rootFolderName')}`);
+            console.log(`📁 Using root folder ID: ${config.get('rootFolderId')}`);
         } catch (error) {
             console.error('❌ Error setting root folder:', error);
         }
