@@ -1,5 +1,6 @@
 const { google } = require('googleapis');
 const axios = require('axios');
+const config = require('../utils/config');
 
 class GoogleDriveService {
     constructor() {
@@ -228,7 +229,9 @@ class GoogleDriveService {
      */
     async buildFolderCache(rootFolderId = null) {
         try {
-            const rootId = rootFolderId || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
+            // Use config root folder if set, otherwise fall back to env or 'root'
+            const config = require('../utils/config');
+            const rootId = rootFolderId || config.get('rootFolderId') || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
             console.log('📁 Building folder cache from Google Drive...');
             console.log(`🔒 Restricting to root folder: ${rootId}`);
             
@@ -474,7 +477,9 @@ class GoogleDriveService {
      */
     getCachedFolderIdByPath(folderPath) {
         if (!folderPath || folderPath === '/') {
-            return process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
+            // Use config root folder if set, otherwise fall back to env or 'root'
+            const config = require('../utils/config');
+            return config.get('rootFolderId') || process.env.DEFAULT_DRIVE_FOLDER_ID || 'root';
         }
 
         // Find folder in flat cache by path
@@ -487,6 +492,47 @@ class GoogleDriveService {
         // Fallback to original method if not found in cache
         console.log(`⚠️ Folder not found in cache: ${folderPath}, using fallback method`);
         return this.getFolderIdByPath(folderPath);
+    }
+
+    /**
+     * Set the root folder for the bot
+     */
+    async setRootFolder(folderId) {
+        this.rootFolderId = folderId;
+        console.log(`📁 Root folder set to: ${folderId}`);
+    }
+
+    /**
+     * Get folder information by ID
+     */
+    async getFolderInfo(folderId) {
+        try {
+            const response = await this.drive.files.get({
+                fileId: folderId,
+                fields: 'id, name, mimeType'
+            });
+
+            if (response.data.mimeType !== 'application/vnd.google-apps.folder') {
+                return null; // Not a folder
+            }
+
+            return {
+                id: response.data.id,
+                name: response.data.name
+            };
+        } catch (error) {
+            console.error('❌ Error getting folder info:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Force refresh the folder cache
+     */
+    async refreshFolderCache() {
+        console.log('🔄 Refreshing folder cache...');
+        await this.buildFolderCache();
+        console.log('✅ Folder cache refreshed successfully');
     }
 }
 

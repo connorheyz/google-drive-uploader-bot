@@ -63,32 +63,23 @@ cp .env.example .env
 
 Edit `.env` file with your credentials:
 
+**Note:** The bot now uses a hybrid configuration system. Discord tokens and Google Drive credentials go in `.env`, while bot settings (channels, permissions, etc.) are managed through admin slash commands and stored in `config.json`.
+
 ```env
 # Discord Configuration
 DISCORD_TOKEN=your_discord_bot_token_here
 DISCORD_CLIENT_ID=your_discord_application_id_here
+GUILD_ID=your_server_id_here
 
-# Channel IDs (Enable Developer Mode in Discord, right-click channels, Copy ID)
-UPLOAD_CHANNELS=123456789012345678,987654321098765432
-APPROVAL_CHANNEL_ID=555666777888999000
-
-# Upload emoji (Unicode or custom emoji ID)
-UPLOAD_EMOJI=⬆️
-
-# Officer Permission System
-# Any user with this Discord permission can trigger uploads on any message
-# Common options: ManageMessages, ManageChannels, ModerateMembers, Administrator
-# Full list: https://discord.js.org/#/docs/discord.js/stable/class/PermissionsBitField?scrollTo=s-Flags
-OFFICER_PERMISSION=ManageMessages
+# Server ID for faster slash command registration (optional)
+# Enable Developer Mode in Discord, right-click your server, Copy ID
+# If not provided, commands will be registered globally (takes up to 1 hour)
 
 # Google Drive Configuration
 GOOGLE_CLIENT_ID=your_google_client_id_here
 GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 GOOGLE_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
 GOOGLE_REFRESH_TOKEN=your_google_refresh_token_here
-
-# Default upload folder ID in Google Drive
-DEFAULT_DRIVE_FOLDER_ID=your_default_folder_id_here
 ```
 
 ### 6. Permission System
@@ -127,4 +118,25 @@ npm run dev
 # Production
 npm start
 ```
+
+### 8. Admin Commands
+
+After the bot is running, use these slash commands to configure it:
+
+**Officer Commands** (requires Manage Messages permission):
+- `/set-emoji <emoji>` - Set the upload trigger emoji
+- `/add-channel <channel>` - Add a channel for uploads
+- `/remove-channel <channel>` - Remove a channel from uploads
+- `/set-approval-channel <channel>` - Set the approval channel
+- `/refresh-cache` - Refresh the Google Drive folder cache
+- `/show-config` - Display current configuration
+
+**Admin Commands** (requires Administrator permission):
+- `/set-root-folder <google-drive-share-link>` - Set the root Google Drive folder
+
+**Setting the Root Folder:**
+1. In Google Drive, right-click your desired root folder
+2. Click "Share" → "Copy link"
+3. Use `/set-root-folder` command with that link
+4. The bot will extract the folder ID and restrict all uploads to that folder
  
