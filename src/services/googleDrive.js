@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const axios = require('axios');
 const config = require('../utils/config');
+const credentials = require('../utils/credentials');
 
 class GoogleDriveService {
     constructor() {
@@ -8,17 +9,23 @@ class GoogleDriveService {
         console.log('🔧 Initializing Google Drive Service...');
         console.log(`   Client ID: ${process.env.GOOGLE_CLIENT_ID?.substring(0, 20)}...`);
         console.log(`   Client Secret: ${process.env.GOOGLE_CLIENT_SECRET?.substring(0, 10)}...`);
-        console.log(`   Refresh Token: ${process.env.GOOGLE_REFRESH_TOKEN?.substring(0, 20)}...`);
         
+        // Always load refresh token from credentials file (env var is ignored)
+        const savedToken = credentials.getRefreshTokenSync();
+        if (savedToken) {
+            console.log('🔑 Loaded refresh token from credentials file');
+        } else {
+            console.log('⚠️ No refresh token found in credentials file. Google Drive features will be disabled until admin completes /google-auth-start & /google-auth-finish');
+        }
+
         this.oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
             process.env.GOOGLE_REDIRECT_URI
         );
 
-        this.oauth2Client.setCredentials({
-            refresh_token: process.env.GOOGLE_REFRESH_TOKEN
-        });
+        // Apply credentials (may be undefined)
+        this.oauth2Client.setCredentials({ refresh_token: savedToken });
 
         this.drive = google.drive({ version: 'v3', auth: this.oauth2Client });
         
@@ -533,6 +540,19 @@ class GoogleDriveService {
         console.log('🔄 Refreshing folder cache...');
         await this.buildFolderCache();
         console.log('✅ Folder cache refreshed successfully');
+    }
+
+    /**
+     * Apply a newly obtained refresh token at runtime
+     */
+    async applyNewRefreshToken(token) {
+        this.oauth2Client.setCredentials({ refresh_token: token });
+        try {
+            await credentials.setRefreshToken(token);
+            console.log('✅ New refresh token persisted to credentials file');
+        } catch (err) {
+            console.error('❌ Failed to persist new refresh token:', err.message);
+        }
     }
 }
 

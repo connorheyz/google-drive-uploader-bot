@@ -276,7 +276,7 @@ client.on(Events.InteractionCreate, async interaction => {
     
     const adminCommands = [
         'set-upload-emoji', 'add-upload-channel', 'remove-upload-channel',
-        'set-approval-channel', 'refresh-folders', 'set-root-folder', 'show-config'
+        'set-approval-channel', 'refresh-folders', 'set-root-folder', 'show-config', 'google-auth-start', 'google-auth-finish'
     ];
     
     if (adminCommands.includes(interaction.commandName)) {
