@@ -1,5 +1,10 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const config = require('../utils/config');
+const { google } = require('googleapis');
+const crypto = require('crypto');
+
+// Map to track pending auth states
+const googleAuthStates = new Map();
 
 /**
  * Check if user has officer permissions
@@ -90,6 +95,26 @@ function createAdminCommands() {
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     );
 
+    // Google OAuth start (admin only)
+    commands.push(
+        new SlashCommandBuilder()
+            .setName('google-auth-start')
+            .setDescription('Start Google Drive OAuth flow (ADMIN ONLY)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    );
+
+    // Google OAuth finish
+    commands.push(
+        new SlashCommandBuilder()
+            .setName('google-auth-finish')
+            .setDescription('Complete Google OAuth flow with authorization code (ADMIN ONLY)')
+            .addStringOption(option =>
+                option.setName('code')
+                    .setDescription('Authorization code returned by Google')
+                    .setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    );
+
     // Show config
     commands.push(
         new SlashCommandBuilder()
@@ -141,6 +166,12 @@ async function handleAdminCommand(interaction, driveService) {
                 break;
             case 'set-root-folder':
                 await handleSetRootFolder(interaction, driveService);
+                break;
+            case 'google-auth-start':
+                await handleGoogleAuthStart(interaction);
+                break;
+            case 'google-auth-finish':
+                await handleGoogleAuthFinish(interaction, driveService);
                 break;
             case 'show-config':
                 await handleShowConfig(interaction);
@@ -240,6 +271,69 @@ async function handleSetRootFolder(interaction, driveService) {
     } catch (error) {
         console.error('❌ Error setting root folder:', error);
         await interaction.editReply('❌ Failed to set root folder. Make sure the folder exists and the bot has access.');
+    }
+}
+
+async function handleGoogleAuthStart(interaction) {
+    // Generate random state string
+    const state = crypto.randomBytes(16).toString('hex');
+
+    const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.GOOGLE_REDIRECT_URI || 'urn:ietf:wg:oauth:2.0:oob'
+    );
+
+    const authUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline', // ensures refresh token
+        scope: ['https://www.googleapis.com/auth/drive'],
+        prompt: 'consent',
+        state
+    });
+
+    // Store state -> user mapping (expires in 10 min)
+    googleAuthStates.set(state, { userId: interaction.user.id, created: Date.now() });
+    setTimeout(() => googleAuthStates.delete(state), 10 * 60 * 1000);
+
+    const embed = new EmbedBuilder()
+        .setTitle('Google Drive Authorization')
+        .setDescription('Click the button below to authorize the bot. After allowing access you will get an **authorization code** – run `/google-auth-finish` with that code to complete setup.')
+        .setColor(0x4285F4); // Google blue
+
+    const button = new ButtonBuilder()
+        .setLabel('Authorize Google')
+        .setStyle(ButtonStyle.Link)
+        .setURL(authUrl)
+        .setEmoji('🔗');
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    await interaction.editReply({ embeds: [embed], components: [row] });
+}
+
+async function handleGoogleAuthFinish(interaction, driveService) {
+    const code = interaction.options.getString('code');
+
+    // Create OAuth client
+    const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.GOOGLE_REDIRECT_URI || 'urn:ietf:wg:oauth:2.0:oob'
+    );
+
+    try {
+        const { tokens } = await oauth2Client.getToken(code);
+        if (!tokens.refresh_token) {
+            await interaction.editReply('❌ Google did not return a refresh token. Make sure you checked "Consent" during authorization and that you used the link from /google-auth-start.');
+            return;
+        }
+
+        await driveService.applyNewRefreshToken(tokens.refresh_token);
+
+        await interaction.editReply('✅ Google account linked successfully! The bot can now access Google Drive.');
+    } catch (err) {
+        console.error('❌ Error completing OAuth flow:', err);
+        await interaction.editReply('❌ Failed to complete OAuth flow. Check the authorization code and try again.');
     }
 }
 

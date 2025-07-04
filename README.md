@@ -27,23 +27,12 @@ A Discord bot that allows users to upload art from Discord directly to Google Dr
    - Read Messages/View Channels
 6. Invite bot to your server with these permissions
 
-### 3. Google Drive Setup
+### 3. Google Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing one
 3. Enable the Google Drive API
-4. Create credentials (OAuth 2.0 Client ID) of type 'Web Application'
-5. Add `https://developers.google.com/oauthplayground/` as a valid URI
-6. Download the credentials JSON file
-7. Add the `https://www.googleapis.com/auth/drive` scope
-8. Use the Google OAuth playground or a setup script to get refresh token
-
-**Getting Google Refresh Token:**
-```bash
-# You'll need to implement OAuth flow or use tools like:
-# https://developers.google.com/oauthplayground/
-# Set scope to: https://www.googleapis.com/auth/drive
-```
+4. Create credentials (OAuth 2.0 Client ID) of type 'Desktop Application'
 
 ### 4. Installation
 
@@ -69,17 +58,11 @@ Edit `.env` file with your credentials:
 # Discord Configuration
 DISCORD_TOKEN=your_discord_bot_token_here
 DISCORD_CLIENT_ID=your_discord_application_id_here
-GUILD_ID=your_server_id_here
-
-# Server ID for faster slash command registration (optional)
-# Enable Developer Mode in Discord, right-click your server, Copy ID
-# If not provided, commands will be registered globally (takes up to 1 hour)
 
 # Google Drive Configuration
 GOOGLE_CLIENT_ID=your_google_client_id_here
 GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 GOOGLE_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
-GOOGLE_REFRESH_TOKEN=your_google_refresh_token_here
 ```
 
 ### 6. Permission System
@@ -133,6 +116,8 @@ After the bot is running, use these slash commands to configure it:
 
 **Admin Commands** (requires Administrator permission):
 - `/set-root-folder <google-drive-share-link>` - Set the root Google Drive folder
+- `/google-auth-start` - Authenticate your google account with the bot
+- `/google-auth-finish` - Provide the refresh token to the bot for authorization
 
 **Setting the Root Folder:**
 1. In Google Drive, right-click your desired root folder
