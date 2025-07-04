@@ -19,6 +19,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null, u
             { name: '📝 File Name', value: request.fileName, inline: true },
             { name: '📋 Description', value: request.description || '*(none)*', inline: false }
         )
+        .setFooter({ text: `cid:${request.channelId}` })
         .setColor(0x3498db)
         .setTimestamp();
 
@@ -121,6 +122,12 @@ function extractRequestFromDMEmbed(embed, interaction) {
     
     if (!attachmentUrl || !originalFileName) return null;
     
+    // Channel ID from footer
+    let channelId = null;
+    if (embed.footer && embed.footer.text && embed.footer.text.startsWith('cid:')) {
+        channelId = embed.footer.text.replace('cid:', '');
+    }
+
     return {
         attachmentUrl,
         fileSize,
@@ -129,6 +136,7 @@ function extractRequestFromDMEmbed(embed, interaction) {
         fileName,
         description,
         currentPath,
+        channelId,
         requestId: null // Will be set by caller
     };
 }
