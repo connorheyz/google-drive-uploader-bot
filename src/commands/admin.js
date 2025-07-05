@@ -43,7 +43,7 @@ function createAdminCommands() {
     commands.push(
         new SlashCommandBuilder()
             .setName('add-upload-channel')
-            .setDescription('Add a channel where users can react to upload images')
+            .setDescription('Add a channel where users can react to upload assets')
             .addChannelOption(option =>
                 option.setName('channel')
                     .setDescription('The channel to add')

@@ -249,26 +249,6 @@ class GoogleDriveService {
             
             const startTime = Date.now();
             
-            // Validate root folder exists and get its name
-            let rootFolderName = 'Root';
-            if (rootId !== 'root') {
-                try {
-                    const rootFolder = await this.drive.files.get({
-                        fileId: rootId,
-                        fields: 'name, mimeType'
-                    });
-                    rootFolderName = rootFolder.data.name;
-                    console.log(`📂 Root folder name: "${rootFolderName}"`);
-                    
-                    if (rootFolder.data.mimeType !== 'application/vnd.google-apps.folder') {
-                        throw new Error('Root ID is not a folder');
-                    }
-                } catch (error) {
-                    console.error(`❌ Cannot access root folder ${rootId}:`, error.message);
-                    throw new Error(`Invalid root folder: ${rootId}`);
-                }
-            }
-            
             // Clear existing cache
             this.folderCache.tree = {};
             this.folderCache.flat.clear();
