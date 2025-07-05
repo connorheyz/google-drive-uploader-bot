@@ -139,6 +139,9 @@ function createAdminCommands() {
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     );
 
+    // Disable commands in direct messages
+    commands.forEach(cmd => cmd.setDMPermission(false));
+
     return commands;
 }
 
