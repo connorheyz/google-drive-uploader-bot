@@ -493,7 +493,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             // Update message to show cancellation
             const cancelledEmbed = new EmbedBuilder()
                 .setTitle('❌ Upload Cancelled')
-                .setDescription('Upload request has been cancelled. You can start a new upload by reacting to an image with ⬆️.')
+                .setDescription('Upload request has been cancelled. You can start a new upload by reacting to an asset with ⬆️.')
                 .setColor(0xe74c3c)
                 .setTimestamp();
 
@@ -505,12 +505,11 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
         if (interaction.isButton() && interaction.customId === 'dm_cancel_attachments') {
             const cancelledEmbed = new EmbedBuilder()
                 .setTitle('❌ Upload Cancelled')
-                .setDescription('Attachment selection cancelled. You can start a new upload by reacting to an image with ⬆️.')
+                .setDescription('Attachment selection cancelled. You can start a new upload by reacting to an asset with ⬆️.')
                 .setColor(0xe74c3c)
                 .setTimestamp();
 
             await interaction.update({ embeds: [cancelledEmbed], components: [] });
-            return;
         }
     });
 }; 
