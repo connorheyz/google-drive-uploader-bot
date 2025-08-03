@@ -47,6 +47,10 @@ async function loadConfig() {
  */
 async function saveConfig() {
     try {
+        // Ensure config directory exists
+        const configDir = path.dirname(CONFIG_FILE);
+        await fs.mkdir(configDir, { recursive: true });
+        
         await fs.writeFile(CONFIG_FILE, JSON.stringify(currentConfig, null, 2), 'utf8');
         console.log('✅ Configuration saved successfully');
         return true;

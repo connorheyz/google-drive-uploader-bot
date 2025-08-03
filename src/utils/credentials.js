@@ -19,6 +19,10 @@ async function loadCredentials() {
 }
 
 async function saveCredentials(creds) {
+    // Ensure config directory exists
+    const configDir = path.dirname(CREDENTIALS_FILE);
+    await fs.mkdir(configDir, { recursive: true });
+    
     await fs.writeFile(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), 'utf8');
 }
 
@@ -35,6 +39,12 @@ async function setRefreshToken(token) {
 
 function getRefreshTokenSync() {
     try {
+        // Ensure config directory exists
+        const configDir = path.dirname(CREDENTIALS_FILE);
+        if (!fsSync.existsSync(configDir)) {
+            fsSync.mkdirSync(configDir, { recursive: true });
+        }
+        
         const raw = fsSync.readFileSync(CREDENTIALS_FILE, 'utf8');
         return JSON.parse(raw).refresh_token;
     } catch (err) {
