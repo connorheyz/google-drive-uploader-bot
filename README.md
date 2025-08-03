@@ -75,10 +75,10 @@ The bot implements smart permission checking to prevent spam and unintended uplo
 
 **Officer Permission System:**
 
-Set `OFFICER_PERMISSION` to any Discord permission like:
-- `ManageMessages` - Users who can manage messages
-- `ManageChannels` - Users who can manage channels  
-- `ModerateMembers` - Users who can moderate members
+Run `/set-officer-permissions <permission>` to set the officer permission to any Discord permission like:
+- `Manage Messages` - Users who can manage messages
+- `Manage Channels` - Users who can manage channels  
+- `Moderate Members` - Users who can moderate members
 - `Administrator` - Server administrators
 
 Just assign the chosen permission to any role in your Discord server settings, and users with that role will automatically be able to trigger uploads.
@@ -90,7 +90,6 @@ This allows people to react freely with the upload emoji without creating unwant
 2. Create a new role (e.g., "Art Officers") or select an existing role
 3. Enable the permission you configured (e.g., "Manage Messages")
 4. Assign this role to users who should be able to trigger uploads on any message
-5. No need to copy role IDs or modify the bot configuration!
 
 ### 7. Running the Bot
 
@@ -116,6 +115,7 @@ After the bot is running, use these slash commands to configure it:
 - `/show-config` - Display current configuration
 
 **Admin Commands** (requires Administrator permission):
+- `/set-officer-permissions <permission>` - Set the permission required for officers
 - `/set-root-folder <google-drive-share-link>` - Set the root Google Drive folder
 - `/google-auth-start` - Authenticate your google account with the bot
 - `/google-auth-finish` - Provide the refresh token to the bot for authorization
