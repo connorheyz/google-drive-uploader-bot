@@ -32,7 +32,7 @@ A Discord bot that allows users to upload art from Discord directly to Google Dr
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing one
 3. Enable the Google Drive API
-4. Create credentials (OAuth 2.0 Client ID) of type 'Desktop Application'
+4. Create credentials (OAuth 2.0 Client ID) of type 'Web Application'
 
 ### 4. Installation
 
