@@ -52,7 +52,7 @@ cp .env.example .env
 
 Edit `.env` file with your credentials:
 
-**Note:** The bot now uses a hybrid configuration system. Discord tokens and Google Drive credentials go in `.env`, while bot settings (channels, permissions, etc.) are managed through admin slash commands and stored in `config.json`.
+**Note:** The bot now uses a hybrid configuration system. Discord tokens and Google App credentials go in `.env`, while bot settings (channels, permissions, etc.) and Google auth tokens are managed through admin slash commands and stored in `config.json` and `google-credentials.json`.
 
 ```env
 # Discord Configuration
@@ -110,8 +110,9 @@ After the bot is running, use these slash commands to configure it:
 - `/set-emoji <emoji>` - Set the upload trigger emoji
 - `/add-channel <channel>` - Add a channel for uploads
 - `/remove-channel <channel>` - Remove a channel from uploads
-- `/set-approval-channel <channel>` - Set the approval channel
-- `/refresh-cache` - Refresh the Google Drive folder cache
+- `/set-default-approval-channel <channel>` - Set the default approval channel
+- `/map-approval-channel <channel> <channel>` - Map an upload channel to a separate approval channel
+- `/refresh-folders` - Refresh the Google Drive folder structure
 - `/show-config` - Display current configuration
 
 **Admin Commands** (requires Administrator permission):
