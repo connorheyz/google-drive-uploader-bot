@@ -11,7 +11,7 @@ async function loadCredentials() {
         return JSON.parse(raw);
     } catch (err) {
         if (err.code === 'ENOENT') {
-            // File doesn\'t exist – return empty object
+            // File doesn't exist - return empty object
             return {};
         }
         throw err;
