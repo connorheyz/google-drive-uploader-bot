@@ -131,6 +131,29 @@ function createAdminCommands() {
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     );
 
+    // Set officer permission (admin only)
+    commands.push(
+        new SlashCommandBuilder()
+            .setName('set-officer-permission')
+            .setDescription('Set the Discord permission required for officers (ADMIN ONLY)')
+            .addStringOption(option =>
+                option.setName('permission')
+                    .setDescription('Discord permission name (e.g., ManageMessages, ModerateMembers, Administrator)')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'Manage Messages', value: 'ManageMessages' },
+                        { name: 'Manage Channels', value: 'ManageChannels' },
+                        { name: 'Moderate Members', value: 'ModerateMembers' },
+                        { name: 'Manage Roles', value: 'ManageRoles' },
+                        { name: 'Manage Guild', value: 'ManageGuild' },
+                        { name: 'Administrator', value: 'Administrator' },
+                        { name: 'View Audit Log', value: 'ViewAuditLog' },
+                        { name: 'Manage Webhooks', value: 'ManageWebhooks' },
+                        { name: 'Manage Emojis and Stickers', value: 'ManageEmojisAndStickers' }
+                    ))
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    );
+
     // Show config
     commands.push(
         new SlashCommandBuilder()
@@ -152,7 +175,7 @@ async function handleAdminCommand(interaction, driveService) {
     const { commandName, member } = interaction;
 
     // Check permissions
-    if (commandName === 'set-root-folder') {
+    if (['set-root-folder', 'google-auth-start', 'google-auth-finish', 'set-officer-permission'].includes(commandName)) {
         if (!hasAdminPermissions(member)) {
             await interaction.reply({ content: '❌ This command requires Administrator permissions.', flags: MessageFlags.Ephemeral });
             return;
@@ -194,6 +217,9 @@ async function handleAdminCommand(interaction, driveService) {
                 break;
             case 'google-auth-finish':
                 await handleGoogleAuthFinish(interaction, driveService);
+                break;
+            case 'set-officer-permission':
+                await handleSetOfficerPermission(interaction);
                 break;
             case 'show-config':
                 await handleShowConfig(interaction);
@@ -358,6 +384,39 @@ async function handleGoogleAuthFinish(interaction, driveService) {
     } catch (err) {
         console.error('❌ Error completing OAuth flow:', err);
         await interaction.editReply('❌ Failed to complete OAuth flow. Check the authorization code and try again.');
+    }
+}
+
+async function handleSetOfficerPermission(interaction) {
+    const permission = interaction.options.getString('permission');
+    
+    // Validate permission exists in Discord's PermissionFlagsBits
+    if (!PermissionFlagsBits[permission]) {
+        await interaction.editReply(`❌ Invalid permission: ${permission}. Please use a valid Discord permission.`);
+        return;
+    }
+    
+    try {
+        // Update config
+        await config.set('officerPermission', permission);
+        
+        const embed = new EmbedBuilder()
+            .setTitle('✅ Officer Permission Updated')
+            .setDescription(`Officer permission has been set to **${permission}**`)
+            .addFields(
+                { name: '💡 What this means', value: `Users with the "${permission}" permission can now trigger uploads on any message by reacting with the upload emoji.`, inline: false },
+                { name: '🔧 How to use', value: '1. Go to Server Settings → Roles\n2. Create or edit a role\n3. Enable the "' + permission + '" permission\n4. Assign the role to users who should be officers', inline: false }
+            )
+            .setColor(0x27ae60)
+            .setTimestamp();
+        
+        await interaction.editReply({ embeds: [embed] });
+        
+        console.log(`✅ Officer permission updated to: ${permission} by ${interaction.user.tag}`);
+        
+    } catch (error) {
+        console.error('❌ Error updating officer permission:', error);
+        await interaction.editReply('❌ Failed to update officer permission. Check console for details.');
     }
 }
 
