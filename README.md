@@ -75,7 +75,7 @@ The bot implements smart permission checking to prevent spam and unintended uplo
 
 **Officer Permission System:**
 
-Run `/set-officer-permissions <permission>` to set the officer permission to any Discord permission like:
+Run `/set-officer-permission <permission>` to set the officer permission to any Discord permission like:
 - `Manage Messages` - Users who can manage messages
 - `Manage Channels` - Users who can manage channels  
 - `Moderate Members` - Users who can moderate members
@@ -115,7 +115,7 @@ After the bot is running, use these slash commands to configure it:
 - `/show-config` - Display current configuration
 
 **Admin Commands** (requires Administrator permission):
-- `/set-officer-permissions <permission>` - Set the permission required for officers
+- `/set-officer-permission <permission>` - Set the permission required for officers
 - `/set-root-folder <google-drive-share-link>` - Set the root Google Drive folder
 - `/google-auth-start` - Authenticate your google account with the bot
 - `/google-auth-finish` - Provide the refresh token to the bot for authorization
