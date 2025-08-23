@@ -132,7 +132,7 @@ async function setApprovalMapping(uploadChannelId, approvalChannelId) {
  * Remove approval mapping
  */
 async function removeApprovalMapping(uploadChannelId) {
-    if (currentConfig.approvalMappings && currentConfig.approvalMappings[uploadChannelId]) {
+    if (currentConfig.approvalMappings?.[uploadChannelId]) {
         delete currentConfig.approvalMappings[uploadChannelId];
         return await saveConfig();
     }

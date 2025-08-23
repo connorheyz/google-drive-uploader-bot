@@ -61,7 +61,7 @@ async function handleAttachmentSelection(interaction, client, uploadRequests, se
 
     try {
         const embed = interaction.message.embeds[0];
-        if (!embed || !embed.footer) {
+        if (!embed?.footer) {
             await interaction.editReply('❌ Attachment selection message malformed.');
             return;
         }

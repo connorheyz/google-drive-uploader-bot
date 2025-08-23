@@ -1,6 +1,36 @@
 const { Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
 const { safeDM, deleteOriginalDM, formatFileSize } = require('../utils/helpers');
 
+// Constants
+const COLORS = {
+    SUCCESS: 0x27ae60,
+    ERROR: 0xe74c3c,
+    WARNING: 0xf39c12
+};
+
+const CUSTOM_IDS = {
+    ATTACHMENT_SELECT: 'attachment_select_stateless',
+    DM_FOLDER_SELECT: 'dm_folder_select_',
+    DM_FOLDER_BACK: 'dm_folder_back_',
+    DM_EDIT_DETAILS: 'dm_edit_details_',
+    DM_CONFIRM_UPLOAD: 'dm_confirm_upload_',
+    DM_DETAILS_MODAL: 'dm_details_modal_',
+    DM_CANCEL: 'dm_cancel_',
+    DM_CANCEL_ATTACHMENTS: 'dm_cancel_attachments',
+    APPROVE: 'approve_',
+    DENY: 'deny_',
+    OFFICER_EDIT: 'officer_edit_',
+    EDIT_MODAL: 'edit_modal_'
+};
+
+const ERROR_MESSAGES = {
+    REQUEST_EXPIRED: '❌ Upload request expired or not found.',
+    ALREADY_PROCESSED: '❌ This request has already been processed.',
+    MISSING_INFO: '❌ Could not find request information in message.',
+    MISSING_APPROVAL_INFO: '❌ Missing required approval information.',
+    APPROVAL_CHANNEL_NOT_CONFIGURED: '❌ Approval channel not configured. Please contact an administrator.'
+};
+
 module.exports = (client, uploadRequests, driveService, handlers) => {
     const { 
         sendFolderSelectionMessage, 
@@ -9,6 +39,66 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
         createApprovalButtons, 
         handleAttachmentSelection 
     } = handlers;
+
+    // ================================
+    // HELPER FUNCTIONS
+    // ================================
+
+    /**
+     * Common request validation for DM workflow
+     */
+    const validateDMRequest = async (interaction, requestId) => {
+        const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
+        if (!request) {
+            await interaction.reply({ content: ERROR_MESSAGES.REQUEST_EXPIRED, flags: MessageFlags.Ephemeral });
+            return null;
+        }
+        request.requestId = requestId;
+        uploadRequests.set(requestId, request);
+        return request;
+    };
+
+    /**
+     * Extract field value from approval embed
+     */
+    const getFieldValue = (embed, fieldName) => {
+        return embed.fields.find(f => f.name === fieldName)?.value;
+    };
+
+    /**
+     * Check if approval request is already processed
+     */
+    const isAlreadyProcessed = (embed) => {
+        return embed.title.includes('APPROVED') || embed.title.includes('DENIED') || embed.title.includes('FAILED');
+    };
+
+    /**
+     * Common approval validation
+     */
+    const validateApprovalRequest = async (interaction) => {
+        const embed = interaction.message.embeds[0];
+        if (!embed) {
+            await interaction.reply({ content: ERROR_MESSAGES.MISSING_INFO, flags: MessageFlags.Ephemeral });
+            return null;
+        }
+
+        if (isAlreadyProcessed(embed)) {
+            await interaction.reply({ content: ERROR_MESSAGES.ALREADY_PROCESSED, flags: MessageFlags.Ephemeral });
+            return null;
+        }
+
+        return embed;
+    };
+
+    /**
+     * Create common error handler for DM workflow
+     */
+    const createDMErrorHandler = (operation) => {
+        return async (error, interaction) => {
+            console.error(`❌ Error ${operation}:`, error);
+            await interaction.followUp({ content: `❌ Error ${operation}.`, flags: MessageFlags.Ephemeral });
+        };
+    };
 
     // ================================
     // INTERACTION HANDLERS
@@ -21,23 +111,19 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
         // DM WORKFLOW INTERACTIONS
         // ================================
 
-        // Handle attachment selection for multiple attachments (stateless)
-        if (interaction.isStringSelectMenu() && interaction.customId === 'attachment_select_stateless') {
+        // Attachment Selection
+        if (interaction.isStringSelectMenu() && interaction.customId === CUSTOM_IDS.ATTACHMENT_SELECT) {
             await handleAttachmentSelection(interaction, client, uploadRequests, sendFolderSelectionMessage);
             return;
         }
 
-        // Handle folder selection (select menu)
-        if (interaction.isStringSelectMenu() && interaction.customId.startsWith('dm_folder_select_')) {
-            const requestId = interaction.customId.replace('dm_folder_select_', '');
+        // Folder Navigation
+        if (interaction.isStringSelectMenu() && interaction.customId.startsWith(CUSTOM_IDS.DM_FOLDER_SELECT)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.DM_FOLDER_SELECT, '');
             
-            const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
-            if (!request) {
-                await interaction.reply({ content: '❌ Upload request expired or not found.', flags: MessageFlags.Ephemeral });
-                return;
-            }
+            const request = await validateDMRequest(interaction, requestId);
+            if (!request) return;
 
-            request.requestId = requestId;
             request.currentPath = interaction.values[0];
             uploadRequests.set(requestId, request);
 
@@ -45,22 +131,17 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             try {
                 await sendFolderSelectionMessage(interaction.user, requestId, interaction);
             } catch (error) {
-                console.error('❌ Error updating folder navigation:', error);
-                await interaction.followUp({ content: '❌ Error updating folder navigation.', flags: MessageFlags.Ephemeral });
+                await createDMErrorHandler('updating folder navigation')(error, interaction);
             }
         }
 
-        // Handle back navigation
-        if (interaction.isButton() && interaction.customId.startsWith('dm_folder_back_')) {
-            const requestId = interaction.customId.replace('dm_folder_back_', '');
+        // Back Navigation
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.DM_FOLDER_BACK)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.DM_FOLDER_BACK, '');
             
-            const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
-            if (!request) {
-                await interaction.reply({ content: '❌ Upload request expired or not found.', flags: MessageFlags.Ephemeral });
-                return;
-            }
+            const request = await validateDMRequest(interaction, requestId);
+            if (!request) return;
 
-            request.requestId = requestId;
             const pathParts = request.currentPath.split('/');
             pathParts.pop();
             request.currentPath = pathParts.join('/');
@@ -70,27 +151,20 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             try {
                 await sendFolderSelectionMessage(interaction.user, requestId, interaction);
             } catch (error) {
-                console.error('❌ Error navigating back:', error);
-                await interaction.followUp({ content: '❌ Error navigating back.', flags: MessageFlags.Ephemeral });
+                await createDMErrorHandler('navigating back')(error, interaction);
             }
             return;
         }
 
-        // Handle edit details button
-        if (interaction.isButton() && interaction.customId.startsWith('dm_edit_details_')) {
-            const requestId = interaction.customId.replace('dm_edit_details_', '');
+        // Edit Details
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.DM_EDIT_DETAILS)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.DM_EDIT_DETAILS, '');
             
-            const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
-            if (!request) {
-                await interaction.reply({ content: '❌ Upload request expired or not found.', flags: MessageFlags.Ephemeral });
-                return;
-            }
-            
-            request.requestId = requestId;
-            uploadRequests.set(requestId, request);
+            const request = await validateDMRequest(interaction, requestId);
+            if (!request) return;
 
             const modal = new ModalBuilder()
-                .setCustomId(`dm_details_modal_${requestId}`)
+                .setCustomId(`${CUSTOM_IDS.DM_DETAILS_MODAL}${requestId}`)
                 .setTitle('✏️ Edit Upload Details');
 
             const fileNameInput = new TextInputBuilder()
@@ -119,18 +193,12 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             return;
         }
 
-        // Handle confirm upload button
-        if (interaction.isButton() && interaction.customId.startsWith('dm_confirm_upload_')) {
-            const requestId = interaction.customId.replace('dm_confirm_upload_', '');
+        // Confirm Upload
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.DM_CONFIRM_UPLOAD)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.DM_CONFIRM_UPLOAD, '');
             
-            const request = extractRequestFromDMEmbed(interaction.message.embeds[0], interaction);
-            if (!request) {
-                await interaction.reply({ content: '❌ Upload request expired or not found.', flags: MessageFlags.Ephemeral });
-                return;
-            }
-            
-            request.requestId = requestId;
-            uploadRequests.set(requestId, request);
+            const request = await validateDMRequest(interaction, requestId);
+            if (!request) return;
 
             try {
                 // Send approval request to officer channel
@@ -139,7 +207,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                 const approvalId = getApprovalChannelFor(request.channelId || interaction.channelId);
                 const approvalChannel = approvalId ? client.channels.cache.get(approvalId) : null;
                 if (!approvalChannel) {
-                    await interaction.reply({ content: '❌ Approval channel not configured. Please contact an administrator.', flags: MessageFlags.Ephemeral });
+                    await interaction.reply({ content: ERROR_MESSAGES.APPROVAL_CHANNEL_NOT_CONFIGURED, flags: MessageFlags.Ephemeral });
                     return;
                 }
 
@@ -164,7 +232,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                         { name: '📋 Description', value: request.description || '*(none)*', inline: false },
                         { name: '⏳ Status', value: 'Sent to officers for approval. You\'ll be notified when processed.', inline: false }
                     )
-                    .setColor(0xf39c12)
+                    .setColor(COLORS.WARNING)
                     .setTimestamp();
 
                 try {
@@ -200,13 +268,13 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             return;
         }
 
-        // Handle modal submissions for editing details
-        if (interaction.isModalSubmit() && interaction.customId.startsWith('dm_details_modal_')) {
-            const requestId = interaction.customId.replace('dm_details_modal_', '');
+        // Modal Submissions - Edit Details
+        if (interaction.isModalSubmit() && interaction.customId.startsWith(CUSTOM_IDS.DM_DETAILS_MODAL)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.DM_DETAILS_MODAL, '');
             
             const request = uploadRequests.get(requestId);
             if (!request) {
-                await interaction.reply({ content: '❌ Upload request expired or not found.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: ERROR_MESSAGES.REQUEST_EXPIRED, flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -219,8 +287,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             try {
                 await sendFolderSelectionMessage(interaction.user, requestId, interaction);
             } catch (error) {
-                console.error('❌ Error updating details:', error);
-                await interaction.followUp({ content: '❌ Error updating details.', flags: MessageFlags.Ephemeral });
+                await createDMErrorHandler('updating details')(error, interaction);
             }
             return;
         }
@@ -229,32 +296,21 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
         // APPROVAL WORKFLOW INTERACTIONS
         // ================================
 
-        // Handle approval button
-        if (interaction.isButton() && interaction.customId.startsWith('approve_')) {
-            const dmMessageId = interaction.customId.replace('approve_', '');
+        // Approval Actions
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.APPROVE)) {
+            const dmMessageId = interaction.customId.replace(CUSTOM_IDS.APPROVE, '');
             
-            // Get approval info from embed
-            const embed = interaction.message.embeds[0];
-            if (!embed) {
-                await interaction.reply({ content: '❌ Could not find request information in message.', flags: MessageFlags.Ephemeral });
-                return;
-            }
+            const embed = await validateApprovalRequest(interaction);
+            if (!embed) return;
 
-            // Check if already processed
-            if (embed.title.includes('APPROVED') || embed.title.includes('DENIED') || embed.title.includes('FAILED')) {
-                await interaction.reply({ content: '❌ This request has already been processed.', flags: MessageFlags.Ephemeral });
-                return;
-            }
-
-            const getFieldValue = (fieldName) => embed.fields.find(f => f.name === fieldName)?.value;
-            const userId = getFieldValue('👤 Requested by')?.match(/<@(\d+)>/)?.[1];
-            const fileName = getFieldValue('📁 File Name');
-            const uploadPath = getFieldValue('📂 Upload Path')?.replace('*(root folder)*', '') || '';
-            const attachmentUrl = getFieldValue('🔗 Original File');
-            const description = getFieldValue('📋 Description')?.replace('*(no description)*', '') || '';
+            const userId = getFieldValue(embed, '👤 Requested by')?.match(/<@(\d+)>/)?.[1];
+            const fileName = getFieldValue(embed, '📁 File Name');
+            const uploadPath = getFieldValue(embed, '📂 Upload Path')?.replace('*(root folder)*', '') || '';
+            const attachmentUrl = getFieldValue(embed, '🔗 Original File');
+            const description = getFieldValue(embed, '📋 Description')?.replace('*(no description)*', '') || '';
 
             if (!userId || !fileName || !attachmentUrl) {
-                await interaction.reply({ content: '❌ Missing required approval information.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: ERROR_MESSAGES.MISSING_APPROVAL_INFO, flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -266,7 +322,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                 
                 // Update approval message
                 const updatedEmbed = EmbedBuilder.from(embed)
-                    .setColor(0x27ae60)
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('✅ Upload Request APPROVED')
                     .addFields({ name: '👨‍💼 Approved by', value: `<@${interaction.user.id}>`, inline: true });
 
@@ -287,7 +343,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                             { name: '👨‍💼 Approved by', value: interaction.user.displayName, inline: true },
                             { name: '🔗 View File', value: `[Open in Google Drive](${result.webViewLink})`, inline: false }
                         )
-                        .setColor(0x27ae60)
+                        .setColor(COLORS.SUCCESS)
                         .setTimestamp();
 
                     await safeDM(requester, { embeds: [successEmbed] });
@@ -302,7 +358,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                  console.error('❌ Error during upload approval:', error);
                  
                  const errorEmbed = EmbedBuilder.from(embed)
-                     .setColor(0xe74c3c)
+                     .setColor(COLORS.ERROR)
                      .setTitle('❌ Upload Request FAILED')
                      .addFields({ name: '❌ Error', value: error.message, inline: false });
 
@@ -316,14 +372,14 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
              return;
         }
 
-        // Handle denial button
-        if (interaction.isButton() && interaction.customId.startsWith('deny_')) {
-            const dmMessageId = interaction.customId.replace('deny_', '');
+        // Denial Actions
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.DENY)) {
+            const dmMessageId = interaction.customId.replace(CUSTOM_IDS.DENY, '');
             
             // Get user ID from embed
             const embed = interaction.message.embeds[0];
             if (!embed) {
-                await interaction.reply({ content: '❌ Could not find request information in message.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: ERROR_MESSAGES.MISSING_INFO, flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -347,7 +403,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             try {
                 // Update approval message
                 const updatedEmbed = EmbedBuilder.from(embed)
-                    .setColor(0xe74c3c)
+                    .setColor(COLORS.ERROR)
                     .setTitle('❌ Upload Request DENIED')
                     .addFields({ name: '👨‍💼 Denied by', value: `<@${interaction.user.id}>`, inline: true });
 
@@ -363,7 +419,7 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
                         .setTitle('❌ Upload Request Denied')
                         .setDescription(`Your upload request for **${fileName}** has been denied.`)
                         .addFields({ name: '👨‍💼 Denied by', value: interaction.user.displayName, inline: true })
-                        .setColor(0xe74c3c)
+                        .setColor(COLORS.ERROR)
                         .setTimestamp();
 
                     await safeDM(requester, { embeds: [deniedEmbed] });
@@ -381,14 +437,14 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             return;
         }
 
-        // Handle officer edit button
-        if (interaction.isButton() && interaction.customId.startsWith('officer_edit_')) {
-            const requestId = interaction.customId.replace('officer_edit_', '');
+        // Officer Edit Actions
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.OFFICER_EDIT)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.OFFICER_EDIT, '');
             
             // Extract current data from approval embed (stateless)
             const embed = interaction.message.embeds[0];
             if (!embed) {
-                await interaction.reply({ content: '❌ Could not find request information in message.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: ERROR_MESSAGES.MISSING_INFO, flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -440,24 +496,22 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             return;
         }
 
-        // Handle officer edit modal submission
-        if (interaction.isModalSubmit() && interaction.customId.startsWith('edit_modal_')) {
-            const requestId = interaction.customId.replace('edit_modal_', '');
+        // Modal Submissions - Officer Edit
+        if (interaction.isModalSubmit() && interaction.customId.startsWith(CUSTOM_IDS.EDIT_MODAL)) {
             
             // Extract original data from embed (stateless)
             const embed = interaction.message.embeds[0];
             if (!embed) {
-                await interaction.reply({ content: '❌ Could not find request information in message.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: ERROR_MESSAGES.MISSING_INFO, flags: MessageFlags.Ephemeral });
                 return;
             }
 
-            const getFieldValue = (fieldName) => embed.fields.find(f => f.name === fieldName)?.value;
-            const userId = getFieldValue('👤 Requested by')?.match(/<@(\d+)>/)?.[1];
-            const fileSizeStr = getFieldValue('📊 File Size');
-            const attachmentUrl = getFieldValue('🔗 Original File');
+            const userId = getFieldValue(embed, '👤 Requested by')?.match(/<@(\d+)>/)?.[1];
+            const fileSizeStr = getFieldValue(embed, '📊 File Size');
+            const attachmentUrl = getFieldValue(embed, '🔗 Original File');
 
             if (!userId || !attachmentUrl) {
-                await interaction.reply({ content: '❌ Missing required information in approval request.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: ERROR_MESSAGES.MISSING_APPROVAL_INFO, flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -483,9 +537,9 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             return;
         }
 
-        // Handle cancel button for individual upload workflow
-        if (interaction.isButton() && interaction.customId.startsWith('dm_cancel_')) {
-            const requestId = interaction.customId.replace('dm_cancel_', '');
+        // Cancel Actions - Individual Upload
+        if (interaction.isButton() && interaction.customId.startsWith(CUSTOM_IDS.DM_CANCEL)) {
+            const requestId = interaction.customId.replace(CUSTOM_IDS.DM_CANCEL, '');
             
             // Clean up the upload request from memory
             uploadRequests.delete(requestId);
@@ -494,19 +548,19 @@ module.exports = (client, uploadRequests, driveService, handlers) => {
             const cancelledEmbed = new EmbedBuilder()
                 .setTitle('❌ Upload Cancelled')
                 .setDescription('Upload request has been cancelled. You can start a new upload by reacting to an asset with ⬆️.')
-                .setColor(0xe74c3c)
+                .setColor(COLORS.ERROR)
                 .setTimestamp();
 
             await interaction.update({ embeds: [cancelledEmbed], components: [] });
             return;
         }
 
-        // Handle cancel button for attachment selection
-        if (interaction.isButton() && interaction.customId === 'dm_cancel_attachments') {
+        // Cancel Actions - Attachment Selection
+        if (interaction.isButton() && interaction.customId === CUSTOM_IDS.DM_CANCEL_ATTACHMENTS) {
             const cancelledEmbed = new EmbedBuilder()
                 .setTitle('❌ Upload Cancelled')
                 .setDescription('Attachment selection cancelled. You can start a new upload by reacting to an asset with ⬆️.')
-                .setColor(0xe74c3c)
+                .setColor(COLORS.ERROR)
                 .setTimestamp();
 
             await interaction.update({ embeds: [cancelledEmbed], components: [] });

@@ -49,31 +49,12 @@ client.once(Events.ClientReady, async (readyClient) => {
     // Load configuration
     await config.loadConfig();
     
-    console.log(`Discord Art Upload Bot is ready!`);
-    console.log(`Logged in as ${readyClient.user.tag}`);
-    console.log(`Upload channels: ${config.get('uploadChannels').length}`);
-    console.log(`Default approval channel: ${config.get('defaultApprovalChannelId') || 'Not configured'}`);
-    console.log(`Upload emoji: ${config.get('uploadEmoji')}`);
-    console.log(`Officer permission: ${config.get('officerPermission')}`);
-    console.log(`Root folder ID: ${config.get('rootFolderId') || 'Not configured'}`);
-    
-    // Validate officer permission
-    const officerPermission = config.get('officerPermission');
-    if (officerPermission && !PermissionsBitField.Flags[officerPermission]) {
-        console.error(`❌ Invalid officer permission: ${officerPermission}`);
-        console.log('Valid permissions include: ManageMessages, ManageChannels, ModerateMembers, Administrator, etc.');
-    }
-    
     // Register slash commands (only if they don't exist or need updates)
     try {
         const commands = createAdminCommands();
         const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
         
-        console.log('🔄 Checking admin slash commands...');
-        
-        // Always use global commands for better compatibility
-        console.log('📝 Refreshing global admin slash commands...');
-        console.log('⏳ Note: Global commands may take up to 1 hour to update across all servers');
+        console.log('Checking admin slash commands...');
         
         await rest.put(
             Routes.applicationCommands(readyClient.user.id),
@@ -115,6 +96,8 @@ client.once(Events.ClientReady, async (readyClient) => {
         console.error('❌ Failed to build initial folder cache:', error);
         console.log('The bot will continue running, but folder navigation may not work properly.');
     }
+    
+    console.log(`Discord Art Upload Bot is ready!`);
 });
 
 // Handle message reactions (upload requests)
