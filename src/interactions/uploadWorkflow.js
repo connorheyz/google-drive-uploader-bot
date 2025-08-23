@@ -104,7 +104,7 @@ async function sendFolderSelectionMessage(user, requestId, interaction = null, u
  * Extract upload request data from DM embed (stateless recovery)
  */
 function extractRequestFromDMEmbed(embed, interaction) {
-    if (!embed || embed.title !== '📤 Upload to Google Drive') return null;
+    if (!(embed?.title === '📤 Upload to Google Drive')) return null;
     
     // Extract data from visible fields
     const currentPath = getFieldValue(embed, '📁 Current Location')?.replace('*(Root)*', '') || '';
@@ -124,7 +124,7 @@ function extractRequestFromDMEmbed(embed, interaction) {
     
     // Channel ID from footer
     let channelId = null;
-    if (embed.footer && embed.footer.text && embed.footer.text.startsWith('cid:')) {
+    if (embed.footer?.text?.startsWith('cid:')) {
         channelId = embed.footer.text.replace('cid:', '');
     }
 
